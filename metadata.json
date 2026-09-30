@@ -1,0 +1,6 @@
+{
+  "name": "Sodaipur - Multi-Vendor E-Commerce Platform",
+  "description": "Sodaipur (সোদাইপুর) is a premium multi-vendor e-commerce marketplace featuring real-time seller chat, multi-tier categories, fast checkout, and store management.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -1,0 +1,134 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile with role-based access control (customer, owner, admin)",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "name": { "type": "string" },
+        "email": { "type": "string" },
+        "phone": { "type": "string" },
+        "avatarUrl": { "type": "string" },
+        "address": { "type": "string" },
+        "role": { "type": "string", "enum": ["customer", "owner", "admin"] },
+        "storeId": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["uid", "name", "email", "role"]
+    },
+    "Store": {
+      "title": "Store",
+      "description": "Vendor store profile and status",
+      "type": "object",
+      "properties": {
+        "storeId": { "type": "string" },
+        "ownerUid": { "type": "string" },
+        "storeName": { "type": "string" },
+        "storeSlug": { "type": "string" },
+        "logoUrl": { "type": "string" },
+        "bannerUrl": { "type": "string" },
+        "whatsapp": { "type": "string" },
+        "phone": { "type": "string" },
+        "address": { "type": "string" },
+        "status": { "type": "string", "enum": ["active", "suspended"] },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["storeId", "ownerUid", "storeName", "storeSlug", "status"]
+    },
+    "Category": {
+      "title": "Category",
+      "description": "Multi-tier category taxonomy (Main, Sub, Child, Micro)",
+      "type": "object",
+      "properties": {
+        "categoryId": { "type": "string" },
+        "name": { "type": "string" },
+        "slug": { "type": "string" },
+        "parentId": { "type": "string" },
+        "level": { "type": "number" },
+        "iconUrl": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["categoryId", "name", "slug", "level"]
+    },
+    "Product": {
+      "title": "Product",
+      "description": "Product listing with multi-tier category path and store association",
+      "type": "object",
+      "properties": {
+        "productId": { "type": "string" },
+        "storeId": { "type": "string" },
+        "ownerUid": { "type": "string" },
+        "title": { "type": "string" },
+        "productSlug": { "type": "string" },
+        "price": { "type": "number" },
+        "originalPrice": { "type": "number" },
+        "stock": { "type": "number" },
+        "categoryPath": { "type": "array" },
+        "mainCategory": { "type": "string" },
+        "subCategory": { "type": "string" },
+        "childCategory": { "type": "string" },
+        "description": { "type": "string" },
+        "images": { "type": "array" },
+        "videoUrl": { "type": "string" },
+        "isFeatured": { "type": "boolean" },
+        "status": { "type": "string", "enum": ["approved", "pending"] },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["productId", "storeId", "ownerUid", "title", "productSlug", "price", "stock", "status"]
+    },
+    "Chat": {
+      "title": "Chat",
+      "description": "Direct chat thread between a customer and a store",
+      "type": "object",
+      "properties": {
+        "chatId": { "type": "string" },
+        "customerId": { "type": "string" },
+        "storeId": { "type": "string" },
+        "lastMessage": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["chatId", "customerId", "storeId"]
+    },
+    "Message": {
+      "title": "Message",
+      "description": "Individual message inside a chat thread",
+      "type": "object",
+      "properties": {
+        "messageId": { "type": "string" },
+        "senderId": { "type": "string" },
+        "text": { "type": "string" },
+        "imageUrl": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["messageId", "senderId", "text"]
+    }
+  },
+  "firestore": {
+    "/users/{uid}": {
+      "schema": "User",
+      "description": "User profiles with roles and account metadata"
+    },
+    "/stores/{storeId}": {
+      "schema": "Store",
+      "description": "Store profiles registered by owners"
+    },
+    "/categories/{categoryId}": {
+      "schema": "Category",
+      "description": "Taxonomy nodes for multi-tier product categorization"
+    },
+    "/products/{productId}": {
+      "schema": "Product",
+      "description": "All vendor product items"
+    },
+    "/chats/{chatId}": {
+      "schema": "Chat",
+      "description": "Chat threads between buyers and sellers"
+    },
+    "/chats/{chatId}/messages/{messageId}": {
+      "schema": "Message",
+      "description": "Individual messages in a chat thread"
+    }
+  }
+}

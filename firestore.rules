@@ -1,0 +1,72 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    function isUser(uid) {
+      return isAuthenticated() && request.auth.uid == uid;
+    }
+    
+    function isAdmin() {
+      return isAuthenticated() && 
+        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
+         request.auth.token.email == 'admin@sodaipur.com' ||
+         request.auth.token.email == 'obaedulhaque19@gmail.com');
+    }
+
+    // Users Collection
+    match /users/{uid} {
+      allow read: if isAuthenticated();
+      allow write: if isUser(uid) || isAdmin();
+    }
+
+    // Stores Collection
+    match /stores/{storeId} {
+      allow read: if true;
+      allow create: if isAuthenticated();
+      allow update, delete: if isAuthenticated() && (resource.data.ownerUid == request.auth.uid || isAdmin());
+    }
+
+    // Categories Collection
+    match /categories/{categoryId} {
+      allow read: if true;
+      allow write: if isAuthenticated() && isAdmin();
+    }
+
+    // Products Collection
+    match /products/{productId} {
+      allow read: if true;
+      allow create: if isAuthenticated();
+      allow update, delete: if isAuthenticated() && (resource.data.ownerUid == request.auth.uid || isAdmin());
+    }
+
+    // Chats Collection
+    match /chats/{chatId} {
+      allow read, write: if isAuthenticated();
+      
+      match /messages/{messageId} {
+        allow read, write: if isAuthenticated();
+      }
+    }
+
+    // Orders Collection
+    match /orders/{orderId} {
+      allow read: if isAuthenticated() && (resource.data.customerId == request.auth.uid || resource.data.storeId == request.auth.uid || isAdmin());
+      allow create: if isAuthenticated();
+      allow update: if isAuthenticated() && (resource.data.storeId == request.auth.uid || isAdmin());
+    }
+
+    // System & Test Collections
+    match /banners/{bannerId} {
+      allow read: if true;
+      allow write: if isAuthenticated() && isAdmin();
+    }
+
+    match /test/{docId} {
+      allow read, write: if true;
+    }
+  }
+}
