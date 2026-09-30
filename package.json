@@ -2,6 +2,7 @@
   "name": "react-example",
   "private": true,
   "version": "0.0.0",
+  "description": "Sodaipur - Multi-Vendor E-Commerce Experience with Cloudinary and Firebase",
   "type": "module",
   "scripts": {
     "dev": "vite --port=3000 --host=0.0.0.0",
