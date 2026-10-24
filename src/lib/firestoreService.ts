@@ -15,7 +15,7 @@ import {
   arrayUnion
 } from 'firebase/firestore';
 import { db } from './firebase';
-import type { Category, Store, Product, ChatThread, ChatMessage, Order, Banner, UserProfile } from '../types';
+import type { Category, Store, Product, ChatThread, ChatMessage, Order, Banner, UserProfile, CartItem } from '../types';
 import { INITIAL_CATEGORIES, INITIAL_STORES, INITIAL_PRODUCTS, INITIAL_BANNERS } from './seedData';
 import { generateStoreSlug, generateProductSlug } from './slugify';
 
@@ -545,4 +545,33 @@ export async function addBanner(banner: Omit<Banner, 'bannerId'>): Promise<Banne
 
 export async function deleteBanner(bannerId: string): Promise<void> {
   await deleteDoc(doc(db, 'banners', bannerId));
+}
+
+// ---------------- USER CART PERSISTENCE ---------------- //
+
+export async function getUserCartFromFirestore(uid: string): Promise<CartItem[]> {
+  try {
+    const userDoc = await getDoc(doc(db, 'users', uid));
+    if (userDoc.exists()) {
+      const data = userDoc.data();
+      return (data.cart || []) as CartItem[];
+    }
+  } catch (err) {
+    console.warn('Failed to load cart from Firestore:', err);
+  }
+  return [];
+}
+
+export async function saveUserCartToFirestore(uid: string, cart: CartItem[]): Promise<void> {
+  try {
+    await updateDoc(doc(db, 'users', uid), {
+      cart: cart
+    });
+  } catch (err) {
+    try {
+      await setDoc(doc(db, 'users', uid), { cart: cart }, { merge: true });
+    } catch (e) {
+      console.warn('Failed to save cart to Firestore:', e);
+    }
+  }
 }

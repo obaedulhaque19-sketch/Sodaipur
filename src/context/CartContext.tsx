@@ -1,5 +1,7 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import type { CartItem, Product } from '../types';
+import { useAuth } from './AuthContext';
+import { getUserCartFromFirestore, saveUserCartToFirestore } from '../lib/firestoreService';
 
 interface CartContextType {
   cartItems: CartItem[];
@@ -23,26 +25,45 @@ interface CartContextType {
 
 const CartContext = createContext<CartContextType | undefined>(undefined);
 
-export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [cartItems, setCartItems] = useState<CartItem[]>(() => {
-    try {
-      const saved = localStorage.getItem('sodaipur_cart');
-      return saved ? JSON.parse(saved) : [];
-    } catch {
-      return [];
-    }
-  });
-
+export const CartProvider: React.FC<{ children: React.ReactNode; onRequireAuth?: () => void }> = ({ children, onRequireAuth }) => {
+  const { currentUser } = useAuth();
+  const [cartItems, setCartItems] = useState<CartItem[]>([]);
   const [isCartOpen, setIsCartOpen] = useState(false);
   const [shippingZone, setShippingZone] = useState<'inside_dhaka' | 'outside_dhaka'>('inside_dhaka');
   const [couponCode, setCouponCode] = useState('');
   const [discount, setDiscount] = useState(0);
 
+  // Sync cart with Firestore when user logs in or logs out
   useEffect(() => {
-    localStorage.setItem('sodaipur_cart', JSON.stringify(cartItems));
-  }, [cartItems]);
+    if (currentUser?.uid) {
+      // Fetch user's saved cart from Firestore
+      getUserCartFromFirestore(currentUser.uid).then(remoteCart => {
+        setCartItems(remoteCart);
+      });
+    } else {
+      // Clear cart on logout or for guest
+      setCartItems([]);
+      setCouponCode('');
+      setDiscount(0);
+    }
+  }, [currentUser?.uid]);
+
+  // Persist cart to Firestore whenever cartItems updates for logged in user
+  useEffect(() => {
+    if (currentUser?.uid) {
+      saveUserCartToFirestore(currentUser.uid, cartItems);
+    }
+  }, [cartItems, currentUser?.uid]);
 
   const addToCart = (product: Product, quantity: number = 1, selectedColor?: string, selectedSize?: string) => {
+    // Require authentication before adding to cart
+    if (!currentUser) {
+      if (onRequireAuth) {
+        onRequireAuth();
+      }
+      return;
+    }
+
     setCartItems(prev => {
       const existingIndex = prev.findIndex(item => item.product.productId === product.productId);
       if (existingIndex > -1) {
@@ -52,6 +73,8 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
       return [...prev, { product, quantity, selectedColor, selectedSize }];
     });
+
+    setIsCartOpen(true);
   };
 
   const removeFromCart = (productId: string) => {

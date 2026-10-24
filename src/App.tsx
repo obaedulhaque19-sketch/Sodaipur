@@ -409,56 +409,58 @@ function AppContent() {
   };
 
   return (
-    <div className="h-full max-xl:overflow-hidden xl:min-h-screen bg-slate-50 flex flex-col selection:bg-emerald-100 selection:text-emerald-900 font-sans">
-      {/* Header with Search Suggestions */}
-      <Header
-        categories={categories}
-        products={products}
-        currentPath={currentPath}
-        onNavigate={navigate}
-        onOpenAuth={() => setIsAuthOpen(true)}
-      />
+    <CartProvider onRequireAuth={() => setIsAuthOpen(true)}>
+      <div className="h-full max-xl:overflow-hidden xl:min-h-screen bg-slate-50 flex flex-col selection:bg-emerald-100 selection:text-emerald-900 font-sans">
+        {/* Header with Search Suggestions */}
+        <Header
+          categories={categories}
+          products={products}
+          currentPath={currentPath}
+          onNavigate={navigate}
+          onOpenAuth={() => setIsAuthOpen(true)}
+        />
 
-      {/* Main Content Scroll Wrapper (Scrollable only on Mobile & Tablet view to fix bottom navigation and floating cart disappearing on scroll) */}
-      <div 
-        ref={tabletScrollRef}
-        className="flex-1 flex flex-col max-xl:overflow-y-auto"
-      >
-        {/* Main Content Area */}
-        <main className={`flex-1 w-full mx-auto py-4 sm:py-6 ${
-          currentPath === '/search'
-            ? 'max-w-[1920px] px-4 sm:px-6 lg:px-8 xl:px-10'
-            : 'max-w-7xl px-3 sm:px-4 lg:px-6'
-        }`}>
-          {renderRoute()}
-        </main>
+        {/* Main Content Scroll Wrapper (Scrollable only on Mobile & Tablet view to fix bottom navigation and floating cart disappearing on scroll) */}
+        <div 
+          ref={tabletScrollRef}
+          className="flex-1 flex flex-col max-xl:overflow-y-auto"
+        >
+          {/* Main Content Area */}
+          <main className={`flex-1 w-full mx-auto py-4 sm:py-6 ${
+            currentPath === '/search'
+              ? 'max-w-[1920px] px-4 sm:px-6 lg:px-8 xl:px-10'
+              : 'max-w-7xl px-3 sm:px-4 lg:px-6'
+          }`}>
+            {renderRoute()}
+          </main>
 
-        {/* Footer */}
-        <Footer onNavigate={navigate} />
+          {/* Footer */}
+          <Footer onNavigate={navigate} />
+        </div>
+
+        {/* Fixed Bottom App Navigation (Mobile Only) */}
+        <BottomNavigation
+          currentPath={currentPath}
+          onNavigate={navigate}
+          onOpenAuth={() => setIsAuthOpen(true)}
+        />
+
+        {/* Floating Shopping Cart Button (Mobile Only, Bottom-Right) */}
+        <MobileFloatingCart />
+
+        {/* Shopping Cart Drawer */}
+        <CartDrawer
+          onNavigateCheckout={() => navigate('/checkout')}
+          onNavigateProduct={pSlug => navigate(`/products/${pSlug}`)}
+        />
+
+        {/* Auth Modal */}
+        <AuthModal
+          isOpen={isAuthOpen}
+          onClose={() => setIsAuthOpen(false)}
+        />
       </div>
-
-      {/* Fixed Bottom App Navigation (Mobile Only) */}
-      <BottomNavigation
-        currentPath={currentPath}
-        onNavigate={navigate}
-        onOpenAuth={() => setIsAuthOpen(true)}
-      />
-
-      {/* Floating Shopping Cart Button (Mobile Only, Bottom-Right) */}
-      <MobileFloatingCart />
-
-      {/* Shopping Cart Drawer */}
-      <CartDrawer
-        onNavigateCheckout={() => navigate('/checkout')}
-        onNavigateProduct={pSlug => navigate(`/products/${pSlug}`)}
-      />
-
-      {/* Auth Modal */}
-      <AuthModal
-        isOpen={isAuthOpen}
-        onClose={() => setIsAuthOpen(false)}
-      />
-    </div>
+    </CartProvider>
   );
 }
 
@@ -466,9 +468,7 @@ export default function App() {
   return (
     <LanguageProvider>
       <AuthProvider>
-        <CartProvider>
-          <AppContent />
-        </CartProvider>
+        <AppContent />
       </AuthProvider>
     </LanguageProvider>
   );
