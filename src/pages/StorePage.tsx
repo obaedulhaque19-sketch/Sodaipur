@@ -66,17 +66,17 @@ export const StorePage: React.FC<StorePageProps> = ({
                 <VerifiedStoreName name={store.storeName} badgeSize="auto" />
               </h1>
               {/* Address (Line 2) */}
-              <div className="text-xs sm:text-sm text-slate-500 flex items-start sm:items-center gap-1.5 mt-1 transition-colors group">
-                <MapPin className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-slate-400 group-hover:text-emerald-700 shrink-0 mt-0.5 sm:mt-0 transition-colors" />
-                <span className="text-slate-600 font-medium leading-normal break-normal">
+              <div className="text-xs sm:text-sm text-slate-500 flex items-center gap-1.5 mt-1 transition-colors group">
+                <MapPin className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-slate-400 group-hover:text-emerald-700 shrink-0 transition-colors" />
+                <span className="text-slate-600 font-medium leading-normal whitespace-normal sm:whitespace-nowrap lg:whitespace-nowrap max-w-full">
                   {store.address || 'Dhaka, Bangladesh'}
                 </span>
               </div>
             </div>
           </div>
 
-          {/* Action buttons (Chat, WhatsApp, Call) positioned cleanly below the text on tablet, aligned to the right side */}
-          <div className="flex items-center justify-start sm:justify-end gap-1.5 sm:gap-2.5 w-full pt-1 sm:pt-1 lg:pt-0 shrink-0">
+          {/* Action buttons (Chat, WhatsApp, Call) positioned cleanly on the right side */}
+          <div className="flex items-center justify-start sm:justify-end gap-1.5 sm:gap-2.5 w-full sm:w-auto lg:w-auto pt-1 sm:pt-1 lg:pt-0 shrink-0">
             <button
               onClick={() => onOpenChatWithStore(store.storeId, store.storeName)}
               className="shrink-0 sm:flex-initial py-2 px-3 sm:py-2.5 sm:px-4 bg-emerald-700 hover:bg-emerald-800 text-white rounded-lg sm:rounded-xl text-[11px] sm:text-xs font-bold flex items-center justify-center gap-1 sm:gap-1.5 shadow-xs shadow-emerald-700/20 transition-all cursor-pointer whitespace-nowrap"
