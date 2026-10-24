@@ -34,6 +34,9 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
     if (errorMsg.includes('auth/invalid-email')) {
       return 'ভুল ইমেইল ফরম্যাট! দয়া করে সঠিক ইমেইল টাইপ করুন।';
     }
+    if (errorMsg.includes('auth/unauthorized-domain')) {
+      return 'আপনার এই ডোমেইনটি (sodaipur.onrender.com) ফায়ারবেসে অনুমোদিত নয়। ফায়ারবেস কনসোলে গিয়ে Authentication > Settings > Authorised domains অপশনে "sodaipur.onrender.com" ডোমেইনটি যুক্ত (Add) করে নিন।';
+    }
     if (errorMsg.includes('auth/invalid-credential') || errorMsg.includes('auth/wrong-password') || errorMsg.includes('auth/user-not-found')) {
       return 'ভুল ইমেইল অথবা পাসওয়ার্ড! দয়া করে আবার চেষ্টা করুন অথবা Google দিয়ে লগইন করুন।';
     }

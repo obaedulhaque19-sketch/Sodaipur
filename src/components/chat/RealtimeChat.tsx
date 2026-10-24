@@ -45,6 +45,7 @@ export const RealtimeChat: React.FC<RealtimeChatProps> = ({
   const [uploadingImage, setUploadingImage] = useState(false);
   const [sendingMessage, setSendingMessage] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const isStoreOwner = userProfile?.role === 'owner';
@@ -91,10 +92,20 @@ export const RealtimeChat: React.FC<RealtimeChatProps> = ({
     const unsub = subscribeMessages(activeChatId, (msgs) => {
       setMessages(msgs);
       setTimeout(() => {
-        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+        if (messagesContainerRef.current) {
+          messagesContainerRef.current.scrollTo({
+            top: messagesContainerRef.current.scrollHeight,
+            behavior: 'smooth'
+          });
+        }
       }, 100);
     });
     return () => unsub();
+  }, [activeChatId]);
+
+  // Ensure window is scrolled to top so chat widget is in perfect mid-position of viewport
+  useEffect(() => {
+    window.scrollTo({ top: 0, behavior: 'instant' as ScrollBehavior });
   }, [activeChatId]);
 
   const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -168,7 +179,7 @@ export const RealtimeChat: React.FC<RealtimeChatProps> = ({
   };
 
   return (
-    <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden flex h-[78vh] min-h-[500px]">
+    <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden flex h-[68vh] sm:h-[70vh] lg:h-[72vh] min-h-[420px] sm:min-h-[460px] max-h-[680px] w-full my-auto transition-all">
       {/* Left Sidebar: Threads List (WhatsApp style) */}
       <div className={`w-full md:w-80 lg:w-96 border-r border-slate-200 flex flex-col shrink-0 ${
         activeChatId ? 'hidden md:flex' : 'flex'
@@ -293,7 +304,7 @@ export const RealtimeChat: React.FC<RealtimeChatProps> = ({
             </div>
 
             {/* Messages Scroll Area */}
-            <div className="flex-1 overflow-y-auto p-4 space-y-3">
+            <div ref={messagesContainerRef} className="flex-1 overflow-y-auto p-4 space-y-3">
               {messages.length === 0 ? (
                 <div className="h-full flex flex-col items-center justify-center text-center text-slate-400">
                   <div className="w-12 h-12 rounded-full bg-emerald-50 text-emerald-600 flex items-center justify-center mb-2">
