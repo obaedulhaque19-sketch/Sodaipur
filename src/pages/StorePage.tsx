@@ -25,7 +25,6 @@ export const StorePage: React.FC<StorePageProps> = ({
   onNavigateProduct,
   onOpenChatWithStore
 }) => {
-  const [isAddressExpanded, setIsAddressExpanded] = useState(false);
   const storeProducts = products.filter(p => p.storeId === store.storeId && p.status === 'approved');
 
   const handleWhatsApp = () => {
@@ -51,7 +50,7 @@ export const StorePage: React.FC<StorePageProps> = ({
 
         {/* Store Info Bar */}
         <div className="px-4 pb-4 pt-0 sm:px-6 sm:pb-6 relative flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
-          <div className="flex items-center gap-3.5 sm:gap-5 flex-1 min-w-0 w-full lg:w-auto">
+          <div className="flex items-center gap-3.5 sm:gap-5 flex-1 min-w-0 w-full">
             {/* Logo: shifted slightly higher (+2%) on tablet as requested */}
             <div className="-mt-12 sm:-mt-16 lg:-mt-16 w-20 h-20 sm:w-28 sm:h-28 rounded-2xl sm:rounded-3xl bg-white p-1.5 shadow-xl border-2 sm:border-4 border-white overflow-hidden shrink-0 z-10">
               <img
@@ -61,26 +60,17 @@ export const StorePage: React.FC<StorePageProps> = ({
               />
             </div>
 
-            {/* Store Name (Line 1) & Address (Line 2) with full width, never squeezed by buttons on tablet */}
+            {/* Store Name (Line 1) & Address (Line 2) with full width */}
             <div className="pt-2 sm:pt-1 flex-1 min-w-0">
               <h1 className="text-xl sm:text-2xl font-black text-slate-900 leading-tight tracking-tight whitespace-nowrap">
                 <VerifiedStoreName name={store.storeName} badgeSize="auto" />
               </h1>
-              {/* Clickable Address (Line 2) */}
-              <div 
-                onClick={() => setIsAddressExpanded(!isAddressExpanded)}
-                title="সম্পূর্ণ ঠিকানা দেখতে ক্লিক করুন"
-                className="text-xs sm:text-sm text-slate-500 hover:text-slate-700 flex items-center gap-1.5 mt-1 cursor-pointer select-none transition-colors group"
-              >
-                <MapPin className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-slate-400 group-hover:text-emerald-700 shrink-0 transition-colors" />
-                <span className={isAddressExpanded ? 'break-words text-slate-800 font-medium' : 'truncate'}>
+              {/* Address (Line 2) */}
+              <div className="text-xs sm:text-sm text-slate-500 flex items-start sm:items-center gap-1.5 mt-1 transition-colors group">
+                <MapPin className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-slate-400 group-hover:text-emerald-700 shrink-0 mt-0.5 sm:mt-0 transition-colors" />
+                <span className="text-slate-600 font-medium leading-normal break-normal">
                   {store.address || 'Dhaka, Bangladesh'}
                 </span>
-                {!isAddressExpanded && store.address && store.address.length > 25 && (
-                  <span className="text-[10px] text-emerald-700 font-bold shrink-0 ml-1 sm:hidden">
-                    (ট্যাপ করুন)
-                  </span>
-                )}
               </div>
             </div>
           </div>
