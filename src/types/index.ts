@@ -8,7 +8,22 @@ export interface UserProfile {
   avatarUrl?: string;
   address?: string;
   role: UserRole;
-  storeId?: string;
+  storeId?: string; // Primary / currently connected store
+  storeIds?: string[]; // Array of store IDs (up to 10)
+  storeId_1?: string;
+  storeId_2?: string;
+  storeId_3?: string;
+  storeId_4?: string;
+  storeId_5?: string;
+  storeId_6?: string;
+  storeId_7?: string;
+  storeId_8?: string;
+  storeId_9?: string;
+  storeId_10?: string;
+  activeStoreId?: string | null;
+  activeAccountId?: string; // 'customer' or a storeId
+  activeStoreName?: string;
+  activeStoreLogo?: string;
   createdAt?: string;
 }
 

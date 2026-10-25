@@ -19,15 +19,19 @@ service cloud.firestore {
 
     // Users Collection
     match /users/{uid} {
-      allow read: if isAuthenticated();
+      allow read: if true;
       allow write: if isUser(uid) || isAdmin();
+      allow delete: if isUser(uid) || isAdmin();
     }
 
     // Stores Collection
     match /stores/{storeId} {
       allow read: if true;
       allow create: if isAuthenticated();
-      allow update, delete: if isAuthenticated() && (resource.data.ownerUid == request.auth.uid || isAdmin());
+      allow update: if isAuthenticated() && (resource.data.ownerUid == request.auth.uid || isAdmin());
+      allow delete: if isAdmin() || 
+                       (isAuthenticated() && resource.data.ownerUid == request.auth.uid) || 
+                       !exists(/databases/$(database)/documents/users/$(resource.data.ownerUid));
     }
 
     // Categories Collection
@@ -40,15 +44,26 @@ service cloud.firestore {
     match /products/{productId} {
       allow read: if true;
       allow create: if isAuthenticated();
-      allow update, delete: if isAuthenticated() && (resource.data.ownerUid == request.auth.uid || isAdmin());
+      allow update: if isAuthenticated() && (resource.data.ownerUid == request.auth.uid || isAdmin());
+      allow delete: if isAdmin() || 
+                       (isAuthenticated() && resource.data.ownerUid == request.auth.uid) || 
+                       !exists(/databases/$(database)/documents/stores/$(resource.data.storeId)) ||
+                       !exists(/databases/$(database)/documents/users/$(resource.data.ownerUid));
     }
 
     // Chats Collection
     match /chats/{chatId} {
       allow read, write: if isAuthenticated();
+      allow delete: if isAdmin() || 
+                       isAuthenticated() || 
+                       !exists(/databases/$(database)/documents/stores/$(resource.data.storeId)) ||
+                       !exists(/databases/$(database)/documents/users/$(resource.data.customerId));
       
       match /messages/{messageId} {
         allow read, write: if isAuthenticated();
+        allow delete: if isAdmin() || 
+                         isAuthenticated() ||
+                         !exists(/databases/$(database)/documents/chats/$(chatId));
       }
     }
 

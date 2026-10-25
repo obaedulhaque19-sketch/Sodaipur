@@ -29,7 +29,9 @@ import {
   subscribeStores, 
   subscribeProducts, 
   subscribeBanners, 
-  initializeSeedData 
+  initializeSeedData,
+  cleanOrphanedStoresAndProducts,
+  subscribeUsersWatchCleanup
 } from './lib/firestoreService';
 
 function AppContent() {
@@ -60,10 +62,12 @@ function AppContent() {
   const [banners, setBanners] = useState<Banner[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // Initial Seeding and Subscriptions
+  // Initial Seeding, Subscriptions, and Real-time User Cascade Watcher
   useEffect(() => {
-    // Run seed if database is blank
-    initializeSeedData().catch(console.error);
+    // Run seed if database is blank, then run orphan garbage collector
+    initializeSeedData()
+      .then(() => cleanOrphanedStoresAndProducts())
+      .catch(console.error);
 
     const unsubCat = subscribeCategories(setCategories);
     const unsubStore = subscribeStores(setStores);
@@ -72,12 +76,14 @@ function AppContent() {
       setLoading(false);
     });
     const unsubBan = subscribeBanners(setBanners);
+    const unsubUserWatch = subscribeUsersWatchCleanup();
 
     return () => {
       unsubCat();
       unsubStore();
       unsubProd();
       unsubBan();
+      unsubUserWatch();
     };
   }, []);
 

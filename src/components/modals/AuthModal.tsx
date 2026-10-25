@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { X, Lock, Mail, User, ShieldCheck, Store, ShoppingBag } from 'lucide-react';
+import { X, Lock, Mail, User, ShieldCheck, Store, ShoppingBag, Camera } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+import { uploadToCloudinary } from '../../lib/cloudinary';
 import type { UserRole } from '../../types';
 
 interface AuthModalProps {
@@ -15,10 +16,26 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [avatarFile, setAvatarFile] = useState<File | null>(null);
+  const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   if (!isOpen) return null;
+
+  const handleAvatarChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      setAvatarFile(file);
+      const reader = new FileReader();
+      reader.onload = () => {
+        if (typeof reader.result === 'string') {
+          setAvatarPreview(reader.result);
+        }
+      };
+      reader.readAsDataURL(file);
+    }
+  };
 
   const getFriendlyErrorMessage = (errorMsg: string): string => {
     if (errorMsg.includes('auth/operation-not-allowed')) {
@@ -51,7 +68,11 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
       if (tab === 'signin') {
         await signInEmail(email, password);
       } else {
-        await signUpEmail(email, password, name, 'customer');
+        let avatarUrl: string | undefined = undefined;
+        if (avatarFile) {
+          avatarUrl = await uploadToCloudinary(avatarFile, 'image', 'avatar_500');
+        }
+        await signUpEmail(email, password, name, 'customer', avatarUrl);
       }
       if (onSuccess) onSuccess();
       onClose();
@@ -134,20 +155,48 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
         {/* Main form */}
         <form onSubmit={handleSubmit} className="space-y-3">
           {tab === 'signup' && (
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">Full Name</label>
-              <div className="relative">
-                <User className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                <input
-                  type="text"
-                  required
-                  value={name}
-                  onChange={e => setName(e.target.value)}
-                  placeholder="Arif Rahman"
-                  className="w-full text-xs pl-9 pr-3 py-2.5 rounded-xl border border-slate-200 focus:outline-emerald-600 focus:border-emerald-600 bg-white"
-                />
+            <>
+              {/* Profile Picture 500x500 */}
+              <div className="flex items-center gap-3 p-2 bg-slate-50 rounded-xl border border-slate-200">
+                <div className="relative w-12 h-12 rounded-xl bg-emerald-100 flex items-center justify-center shrink-0 overflow-hidden border border-emerald-200">
+                  {avatarPreview ? (
+                    <img src={avatarPreview} alt="Preview" className="w-full h-full object-cover" />
+                  ) : (
+                    <User className="w-6 h-6 text-emerald-700" />
+                  )}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center justify-between">
+                    <label className="block text-[11px] font-bold text-slate-700">Profile Picture (500×500)</label>
+                    <span className="text-[10px] font-medium text-emerald-700 bg-emerald-50 px-1.5 py-0.2 rounded">500x500 auto-fit</span>
+                  </div>
+                  <label className="inline-block mt-0.5 text-[11px] font-bold text-emerald-700 hover:text-emerald-800 cursor-pointer">
+                    <span>{avatarFile ? 'Change Photo' : 'Upload Photo (Optional)'}</span>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={handleAvatarChange}
+                      className="hidden"
+                    />
+                  </label>
+                </div>
               </div>
-            </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">Full Name</label>
+                <div className="relative">
+                  <User className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    required
+                    value={name}
+                    onChange={e => setName(e.target.value)}
+                    placeholder="Arif Rahman"
+                    className="w-full text-xs pl-9 pr-3 py-2.5 rounded-xl border border-slate-200 focus:outline-emerald-600 focus:border-emerald-600 bg-white"
+                  />
+                </div>
+              </div>
+            </>
           )}
 
           <div>

@@ -15,7 +15,11 @@ import {
   DollarSign, 
   ShoppingBag, 
   Image as ImageIcon,
-  Loader2
+  Loader2,
+  ChevronDown,
+  ArrowLeftRight,
+  X,
+  User as UserIcon
 } from 'lucide-react';
 import type { Category, Store, Product, Order } from '../types';
 import { CategoryCascadeSelector } from '../components/product/CategoryCascadeSelector';
@@ -50,7 +54,7 @@ export const SellerDashboardPage: React.FC<SellerDashboardProps> = ({
   onNavigateProduct,
   onNavigate
 }) => {
-  const { currentUser, userProfile, updateProfileData } = useAuth();
+  const { currentUser, userProfile, persona, switchAccount, switchStore } = useAuth();
   const [activeTab, setActiveTab] = useState<'overview' | 'inventory' | 'new_product' | 'orders' | 'chat' | 'settings'>(initialTab);
 
   useEffect(() => {
@@ -59,10 +63,23 @@ export const SellerDashboardPage: React.FC<SellerDashboardProps> = ({
     }
   }, [initialTab, onNavigate]);
 
-  // Store profile of current logged-in owner
-  const myStore = stores.find(s => s.storeId === userProfile?.storeId || s.ownerUid === userProfile?.uid);
+  // Stores owned by this user account (up to 10)
+  const userStores = stores.filter(s => 
+    s.ownerUid === userProfile?.uid || 
+    (currentUser?.uid && s.ownerUid === currentUser.uid) || 
+    userProfile?.storeIds?.includes(s.storeId) || 
+    s.storeId === userProfile?.storeId
+  );
+
+  // Store currently connected/active
+  const myStore = userStores.find(s => 
+    s.storeId === userProfile?.activeStoreId || 
+    s.storeId === userProfile?.storeId
+  ) || userStores[0];
 
   // Store Onboarding Form State
+  const [showNewStoreModal, setShowNewStoreModal] = useState(false);
+  const [showSwitcherModal, setShowSwitcherModal] = useState(false);
   const [storeName, setStoreName] = useState('');
   const [storePhone, setStorePhone] = useState('');
   const [storeWhatsapp, setStoreWhatsapp] = useState('');
@@ -70,6 +87,7 @@ export const SellerDashboardPage: React.FC<SellerDashboardProps> = ({
   const [storeLogoFile, setStoreLogoFile] = useState<File | null>(null);
   const [storeBannerFile, setStoreBannerFile] = useState<File | null>(null);
   const [onboardingLoading, setOnboardingLoading] = useState(false);
+  const [onboardingError, setOnboardingError] = useState<string | null>(null);
   const [previewSlug, setPreviewSlug] = useState('');
 
   // Update slug preview as store name types
@@ -137,21 +155,28 @@ export const SellerDashboardPage: React.FC<SellerDashboardProps> = ({
     }
   };
 
-  // Handle Store Onboarding Submission
+  // Handle Store Onboarding Submission (With Auto-Compress to lightweight KB)
   const handleOnboardStore = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!currentUser && !userProfile) return;
+
+    if (userStores.length >= 10) {
+      setOnboardingError('আপনি ইতিমধ্যে সর্বোচ্চ ১০টি স্টোর তৈরি করেছেন (Maximum 10 stores limit reached)।');
+      return;
+    }
+
     setOnboardingLoading(true);
+    setOnboardingError(null);
 
     try {
       let logoUrl = 'https://images.unsplash.com/photo-1544441893-675973e31985?w=160';
       let bannerUrl = 'https://images.unsplash.com/photo-1441986300917-64674bd600d8?w=1200';
 
       if (storeLogoFile) {
-        logoUrl = await uploadToCloudinary(storeLogoFile);
+        logoUrl = await uploadToCloudinary(storeLogoFile, 'image', 'logo_500');
       }
       if (storeBannerFile) {
-        bannerUrl = await uploadToCloudinary(storeBannerFile);
+        bannerUrl = await uploadToCloudinary(storeBannerFile, 'image', 'banner');
       }
 
       const uid = userProfile?.uid || currentUser?.uid || 'owner_tts_user';
@@ -164,10 +189,21 @@ export const SellerDashboardPage: React.FC<SellerDashboardProps> = ({
         bannerUrl
       });
 
-      await updateProfileData({ role: 'owner', storeId: newStore.storeId });
+      // Automatically connect to the newly created store
+      await switchAccount(newStore.storeId, newStore.storeName, newStore.logoUrl);
+
+      // Clear onboarding form inputs
+      setStoreName('');
+      setStoreWhatsapp('');
+      setStorePhone('');
+      setStoreAddress('');
+      setStoreLogoFile(null);
+      setStoreBannerFile(null);
+      setShowNewStoreModal(false);
       setActiveTab('overview');
-    } catch (err) {
+    } catch (err: any) {
       console.error('Store registration failed:', err);
+      setOnboardingError(err.message || 'স্টোর তৈরি করতে সমস্যা হয়েছে। আবার চেষ্টা করুন।');
     } finally {
       setOnboardingLoading(false);
     }
@@ -190,7 +226,7 @@ export const SellerDashboardPage: React.FC<SellerDashboardProps> = ({
     }
   };
 
-  // Handle Product Upload
+  // Handle Product Upload (Auto-compressed to lightweight KB)
   const handleCreateProductSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!myStore) return;
@@ -200,7 +236,7 @@ export const SellerDashboardPage: React.FC<SellerDashboardProps> = ({
       let finalImages: string[] = [];
 
       if (prodImages.length > 0) {
-        finalImages = await uploadMultipleToCloudinary(prodImages);
+        finalImages = await uploadMultipleToCloudinary(prodImages, 'image', 'product');
       } else {
         // High quality placeholder
         finalImages = ['https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=800'];
@@ -246,198 +282,694 @@ export const SellerDashboardPage: React.FC<SellerDashboardProps> = ({
     }
   };
 
-  // If user is not yet a store owner and has no store, show Onboarding Flow
-  if (!myStore) {
-    return (
-      <div className="max-w-2xl mx-auto py-8 px-4">
-        <div className="bg-white rounded-3xl border border-slate-200/90 p-6 sm:p-10 shadow-lg">
-          <div className="text-center mb-8">
-            <div className="w-16 h-16 rounded-2xl bg-emerald-100 text-emerald-800 flex items-center justify-center mx-auto mb-3">
-              <StoreIcon className="w-8 h-8" />
-            </div>
-            <h1 className="text-2xl font-black text-slate-900">Open Your Store on Sodaipur</h1>
-            <p className="text-xs text-slate-500 mt-1 max-w-md mx-auto">
-              Join 500+ verified merchants. Enjoy direct buyer chat, zero listing fee, and instant automated SEO permalink generation.
+  // Render the Store Registration Form (used for first store or creating additional stores up to 10)
+  const renderStoreRegistrationForm = (isModal: boolean = false) => (
+    <div className={`bg-white rounded-3xl border border-slate-200/90 p-6 sm:p-10 shadow-lg ${isModal ? 'mb-6' : 'max-w-2xl mx-auto py-8'}`}>
+      <div className="text-center mb-6">
+        <div className="w-14 h-14 rounded-2xl bg-emerald-100 text-emerald-800 flex items-center justify-center mx-auto mb-3">
+          <StoreIcon className="w-7 h-7" />
+        </div>
+        <h2 className="text-xl sm:text-2xl font-black text-slate-900">
+          {userStores.length > 0 ? `Open Another Store (${userStores.length + 1}/10)` : 'Open Your Store on Sodaipur'}
+        </h2>
+        <p className="text-xs text-slate-500 mt-1 max-w-md mx-auto">
+          আপনার কাস্টমার অ্যাকাউন্টের মাধ্যমে সর্বোচ্চ ১০টি স্টোর খুলতে এবং পরিচালনা করতে পারবেন।
+        </p>
+      </div>
+
+      {onboardingError && (
+        <div className="mb-4 p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs font-semibold">
+          {onboardingError}
+        </div>
+      )}
+
+      <form onSubmit={handleOnboardStore} className="space-y-4 text-xs">
+        <div>
+          <label className="block font-bold text-slate-700 mb-1">Store Name *</label>
+          <input
+            type="text"
+            required
+            value={storeName}
+            onChange={e => setStoreName(e.target.value)}
+            placeholder="e.g. Dhaka Heritage Mart"
+            className="w-full p-2.5 rounded-xl border border-slate-300 focus:outline-emerald-600 bg-white"
+          />
+          {previewSlug && (
+            <p className="text-[11px] text-emerald-700 font-semibold mt-1">
+              Unique Slug Preview: <span className="font-mono">sodaipur.com/stores/{previewSlug}</span>
             </p>
+          )}
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label className="block font-bold text-slate-700 mb-1">WhatsApp Number *</label>
+            <input
+              type="text"
+              required
+              value={storeWhatsapp}
+              onChange={e => setStoreWhatsapp(e.target.value)}
+              placeholder="+8801700000000"
+              className="w-full p-2.5 rounded-xl border border-slate-300 focus:outline-emerald-600 bg-white"
+            />
+          </div>
+          <div>
+            <label className="block font-bold text-slate-700 mb-1">Phone Number *</label>
+            <input
+              type="text"
+              required
+              value={storePhone}
+              onChange={e => setStorePhone(e.target.value)}
+              placeholder="+8801800000000"
+              className="w-full p-2.5 rounded-xl border border-slate-300 focus:outline-emerald-600 bg-white"
+            />
+          </div>
+        </div>
+
+        <div>
+          <label className="block font-bold text-slate-700 mb-1">Store Physical / Pickup Address *</label>
+          <textarea
+            required
+            rows={2}
+            value={storeAddress}
+            onChange={e => setStoreAddress(e.target.value)}
+            placeholder="Shop 14, Level 3, Eastern Plaza, Hatirpool, Dhaka"
+            className="w-full p-2.5 rounded-xl border border-slate-300 focus:outline-emerald-600 bg-white"
+          />
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
+          <div>
+            <label className="block font-bold text-slate-700 mb-1">
+              Logo Image <span className="text-slate-400 font-normal">(500×500 auto-fit)</span>
+            </label>
+            <input
+              type="file"
+              accept="image/*"
+              onChange={e => setStoreLogoFile(e.target.files?.[0] || null)}
+              className="w-full text-[11px] text-slate-500"
+            />
+            <p className="text-[10px] text-slate-400 mt-0.5">অটোমেটিক্যালি হাই-কোয়ালিটি কেবি (KB) ফরম্যাটে সেভ হবে</p>
+          </div>
+          <div>
+            <label className="block font-bold text-slate-700 mb-1">
+              Store Banner <span className="text-slate-400 font-normal">(Auto-compress)</span>
+            </label>
+            <input
+              type="file"
+              accept="image/*"
+              onChange={e => setStoreBannerFile(e.target.files?.[0] || null)}
+              className="w-full text-[11px] text-slate-500"
+            />
+            <p className="text-[10px] text-slate-400 mt-0.5">অটোমেটিক্যালি হাই-কোয়ালিটি কেবি (KB) ফরম্যাটে সেভ হবে</p>
+          </div>
+        </div>
+
+        <div className="flex gap-2 pt-2">
+          {isModal && (
+            <button
+              type="button"
+              onClick={() => { setShowNewStoreModal(false); setOnboardingError(null); }}
+              className="flex-1 py-3 border border-slate-200 text-slate-700 font-bold rounded-xl hover:bg-slate-50 transition-colors"
+            >
+              Cancel
+            </button>
+          )}
+          <button
+            type="submit"
+            disabled={onboardingLoading}
+            className="flex-1 py-3 bg-emerald-700 hover:bg-emerald-800 text-white font-bold rounded-xl shadow-md transition-all flex items-center justify-center gap-2"
+          >
+            {onboardingLoading ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin" />
+                <span>Optimizing Media & Provisioning Store...</span>
+              </>
+            ) : (
+              <>
+                <StoreIcon className="w-4 h-4" />
+                <span>{userStores.length > 0 ? 'Create & Connect Store' : 'Complete Store Registration'}</span>
+              </>
+            )}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+
+  // If user has no store at all yet, show Customer Account Hub with Onboarding Flow
+  if (userStores.length === 0) {
+    return (
+      <div className="pb-16 space-y-6">
+        {/* Account Switcher Hub showing Customer Account (1 of 11) */}
+        <div className="bg-slate-900 text-white rounded-3xl p-4 sm:p-6 shadow-md border border-slate-800">
+          <div className="flex flex-wrap items-center justify-between gap-3 mb-4 pb-3 border-b border-slate-800">
+            <div>
+              <div className="flex items-center gap-2">
+                <StoreIcon className="w-5 h-5 text-emerald-400" />
+                <h2 className="text-sm sm:text-base font-extrabold tracking-tight">Accounts Management / অ্যাকাউন্ট ব্যবস্থাপনা</h2>
+                <span className="px-2.5 py-0.5 bg-emerald-950 text-emerald-400 border border-emerald-800/60 rounded-full text-[10px] font-bold">
+                  1/11 Accounts Active (1 Customer + 0 Stores)
+                </span>
+              </div>
+              <p className="text-xs text-slate-400 mt-1">
+                আপনার ১টি কাস্টমার আইডি সবসময় থাকবে এবং এর পাশাপাশি সর্বোচ্চ ১০টি সেলার স্টোর খুলতে ও পরিচালনা করতে পারবেন (মোট ১১টি অ্যাকাউন্ট)।
+              </p>
+            </div>
           </div>
 
-          <form onSubmit={handleOnboardStore} className="space-y-4 text-xs">
-            <div>
-              <label className="block font-bold text-slate-700 mb-1">Store Name *</label>
-              <input
-                type="text"
-                required
-                value={storeName}
-                onChange={e => setStoreName(e.target.value)}
-                placeholder="e.g. Dhaka Heritage Mart"
-                className="w-full p-2.5 rounded-xl border border-slate-300 focus:outline-emerald-600 bg-white"
-              />
-              {previewSlug && (
-                <p className="text-[11px] text-emerald-700 font-semibold mt-1">
-                  Unique Slug Preview: <span className="font-mono">sodaipur.com/stores/{previewSlug}</span>
-                </p>
-              )}
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div>
-                <label className="block font-bold text-slate-700 mb-1">WhatsApp Number *</label>
-                <input
-                  type="text"
-                  required
-                  value={storeWhatsapp}
-                  onChange={e => setStoreWhatsapp(e.target.value)}
-                  placeholder="+8801700000000"
-                  className="w-full p-2.5 rounded-xl border border-slate-300 focus:outline-emerald-600 bg-white"
-                />
+          {/* Account Card #1: Customer Account */}
+          <div className="max-w-md p-3.5 rounded-2xl border bg-emerald-900/30 border-emerald-500 shadow-sm ring-1 ring-emerald-500 flex items-center gap-3">
+            <img
+              src={userProfile?.avatarUrl || 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=500'}
+              alt={userProfile?.name || 'Customer'}
+              className="w-12 h-12 rounded-2xl object-cover bg-slate-800 border-2 border-emerald-400 shrink-0"
+            />
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <p className="font-extrabold text-sm text-white truncate">{userProfile?.name || 'Customer Account'}</p>
+                <span className="px-2 py-0.5 bg-amber-500/20 text-amber-300 border border-amber-500/40 text-[9px] font-black rounded-md uppercase">
+                  Customer
+                </span>
               </div>
-              <div>
-                <label className="block font-bold text-slate-700 mb-1">Phone Number *</label>
-                <input
-                  type="text"
-                  required
-                  value={storePhone}
-                  onChange={e => setStorePhone(e.target.value)}
-                  placeholder="+8801800000000"
-                  className="w-full p-2.5 rounded-xl border border-slate-300 focus:outline-emerald-600 bg-white"
-                />
+              <p className="text-[11px] text-slate-300 truncate mt-0.5">{userProfile?.email}</p>
+              <div className="mt-1">
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-emerald-500/20 text-emerald-300 text-[10px] font-extrabold rounded-md uppercase tracking-wider">
+                  <Check className="w-2.5 h-2.5" />
+                  Connected / সক্রিয়
+                </span>
               </div>
             </div>
-
-            <div>
-              <label className="block font-bold text-slate-700 mb-1">Store Physical / Pickup Address *</label>
-              <textarea
-                required
-                rows={2}
-                value={storeAddress}
-                onChange={e => setStoreAddress(e.target.value)}
-                placeholder="Shop 14, Level 3, Eastern Plaza, Hatirpool, Dhaka"
-                className="w-full p-2.5 rounded-xl border border-slate-300 focus:outline-emerald-600 bg-white"
-              />
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
-              <div>
-                <label className="block font-bold text-slate-700 mb-1">Logo Image</label>
-                <input
-                  type="file"
-                  accept="image/*"
-                  onChange={e => setStoreLogoFile(e.target.files?.[0] || null)}
-                  className="w-full text-[11px] text-slate-500"
-                />
-              </div>
-              <div>
-                <label className="block font-bold text-slate-700 mb-1">Store Banner</label>
-                <input
-                  type="file"
-                  accept="image/*"
-                  onChange={e => setStoreBannerFile(e.target.files?.[0] || null)}
-                  className="w-full text-[11px] text-slate-500"
-                />
-              </div>
-            </div>
-
-            <button
-              type="submit"
-              disabled={onboardingLoading}
-              className="w-full mt-4 py-3 bg-emerald-700 hover:bg-emerald-800 text-white font-bold rounded-xl shadow-md transition-all flex items-center justify-center gap-2"
-            >
-              {onboardingLoading ? (
-                <>
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                  <span>Verifying Slug & Provisioning Store...</span>
-                </>
-              ) : (
-                <>
-                  <StoreIcon className="w-4 h-4" />
-                  <span>Complete Store Registration</span>
-                </>
-              )}
-            </button>
-          </form>
+          </div>
         </div>
+
+        {/* Onboarding Form for First Store */}
+        {renderStoreRegistrationForm(false)}
       </div>
     );
   }
 
-  // Dashboard for verified Store Owner
+  // Dashboard for verified Store Owner (supports 1 Customer Account + up to 10 stores = 11 accounts total)
   return (
     <div className="pb-16 space-y-6">
-      {/* Top Banner & Store Header */}
-      <div className="bg-white rounded-3xl border border-slate-200/80 p-4 sm:p-6 shadow-xs flex flex-wrap items-center justify-between gap-4">
-        <div className="flex items-center gap-4">
-          <img
-            src={myStore.logoUrl || 'https://images.unsplash.com/photo-1544441893-675973e31985?w=160'}
-            alt={myStore.storeName}
-            className="w-14 h-14 rounded-2xl object-cover border border-slate-200 shadow-xs"
-          />
-          <div>
-            <div className="flex items-center gap-2 flex-wrap">
-              <h1 className="text-base sm:text-xl font-black text-slate-900 leading-tight">
-                <VerifiedStoreName name={myStore.storeName} badgeSize="md" />
-              </h1>
-              <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 text-[10px] font-bold rounded-full uppercase">
-                {myStore.status}
-              </span>
+      {/* Facebook-Style Compact Multi-Account Switcher Bar */}
+      <div className="bg-slate-900 text-white rounded-2xl p-3 sm:p-3.5 shadow-md border border-slate-800">
+        {/* Top Row: Active Profile Info + Switch Button + Open Store Button */}
+        <div className="flex items-center justify-between gap-3">
+          {/* Active Profile Info */}
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="relative shrink-0">
+              <img
+                src={persona?.type === 'customer'
+                  ? (userProfile?.avatarUrl || 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=500')
+                  : (myStore?.logoUrl || 'https://images.unsplash.com/photo-1544441893-675973e31985?w=160')}
+                alt={persona?.type === 'customer' ? (userProfile?.name || 'Customer') : (myStore?.storeName || 'Store')}
+                className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl object-cover bg-slate-800 border-2 border-emerald-500 shadow-xs"
+              />
+              <span className="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-emerald-500 border-2 border-slate-900 rounded-full" />
             </div>
-            <p className="text-xs text-slate-400 font-mono mt-0.5">
-              slug: /stores/{myStore.storeSlug} • {myProducts.length} listings
-            </p>
+
+            <div className="min-w-0">
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <span className="text-xs sm:text-sm font-extrabold text-white truncate max-w-[130px] sm:max-w-[220px]">
+                  {persona?.type === 'customer' ? (userProfile?.name || 'Customer') : myStore?.storeName}
+                </span>
+                {persona?.type === 'store' && <VerifiedBadge size="xs" />}
+                <span className={`px-1.5 py-0.2 text-[8px] sm:text-[9px] font-black rounded uppercase tracking-wider ${
+                  persona?.type === 'customer'
+                    ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
+                    : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                }`}>
+                  {persona?.type === 'customer' ? 'Customer' : 'Store'}
+                </span>
+                <span className="hidden sm:inline-flex items-center gap-0.5 text-[9px] text-emerald-400 font-bold">
+                  • <Check className="w-2.5 h-2.5" /> সক্রিয়
+                </span>
+              </div>
+              <p className="text-[10px] sm:text-[11px] text-slate-400 truncate">
+                {persona?.type === 'customer' ? userProfile?.email : `/stores/${myStore?.storeSlug}`}
+              </p>
+            </div>
+          </div>
+
+          {/* Right Action Controls: Switch Profile Modal Button & + Open Store Button */}
+          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+            {/* Facebook-style Switch Account Button */}
+            <button
+              type="button"
+              onClick={() => setShowSwitcherModal(true)}
+              className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-100 hover:text-white border border-slate-700 rounded-xl text-xs font-bold transition-all shadow-xs cursor-pointer"
+              title="Switch Account"
+            >
+              <ArrowLeftRight className="w-3.5 h-3.5 text-emerald-400" />
+              <span className="hidden sm:inline">সুইচ করুন</span>
+              <span className="px-1.5 py-0.2 bg-emerald-950 text-emerald-300 text-[10px] font-extrabold rounded-full border border-emerald-800/60">
+                {userStores.length + 1}/11
+              </span>
+              <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
+            </button>
+
+            {/* + Open Store Button */}
+            {userStores.length < 10 ? (
+              <button
+                type="button"
+                onClick={() => setShowNewStoreModal(!showNewStoreModal)}
+                className="px-2.5 sm:px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold flex items-center gap-1 transition-all shadow-xs cursor-pointer shrink-0"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">নতুন স্টোর</span>
+                <span className="sm:hidden">স্টোর</span>
+              </button>
+            ) : (
+              <span className="hidden sm:inline-block text-[10px] font-bold text-amber-400 bg-amber-950/60 px-2 py-1 rounded-lg border border-amber-800/40">
+                10/10 Max
+              </span>
+            )}
           </div>
         </div>
 
-        {/* Tab Navigation Pill Bar */}
-        <div className="flex flex-wrap gap-1.5 bg-slate-100 p-1.5 rounded-2xl text-xs font-bold">
-          <button
-            onClick={() => setActiveTab('overview')}
-            className={`px-3 py-1.5 rounded-xl transition-all ${
-              activeTab === 'overview' ? 'bg-white text-emerald-800 shadow-xs' : 'text-slate-600 hover:text-slate-900'
-            }`}
-          >
-            Overview
-          </button>
-          <button
-            onClick={() => setActiveTab('inventory')}
-            className={`px-3 py-1.5 rounded-xl transition-all ${
-              activeTab === 'inventory' ? 'bg-white text-emerald-800 shadow-xs' : 'text-slate-600 hover:text-slate-900'
-            }`}
-          >
-            Inventory ({myProducts.length})
-          </button>
-          <button
-            onClick={() => setActiveTab('new_product')}
-            className={`px-3 py-1.5 rounded-xl transition-all flex items-center gap-1 ${
-              activeTab === 'new_product' ? 'bg-emerald-700 text-white shadow-xs' : 'text-emerald-700 hover:bg-white'
-            }`}
-          >
-            <Plus className="w-3.5 h-3.5" />
-            <span>Add Product</span>
-          </button>
-          <button
-            onClick={() => setActiveTab('orders')}
-            className={`px-3 py-1.5 rounded-xl transition-all ${
-              activeTab === 'orders' ? 'bg-white text-emerald-800 shadow-xs' : 'text-slate-600 hover:text-slate-900'
-            }`}
-          >
-            Orders ({storeOrders.length})
-          </button>
-          <button
-            onClick={() => {
-              if (onNavigate) {
-                onNavigate('/chat');
-              } else {
-                setActiveTab('chat');
-              }
-            }}
-            className={`px-3 py-1.5 rounded-xl transition-all flex items-center gap-1 cursor-pointer ${
-              activeTab === 'chat' ? 'bg-white text-emerald-800 shadow-xs' : 'text-slate-600 hover:text-slate-900'
-            }`}
-          >
-            <MessageSquare className="w-3.5 h-3.5" />
-            <span>Buyer Chat</span>
-          </button>
+        {/* Bottom Row: Facebook/Instagram Style Horizontal Quick-Switch Avatar Strip */}
+        <div className="mt-2.5 pt-2 border-t border-slate-800/80 flex items-center gap-2 overflow-x-auto no-scrollbar scroll-smooth">
+          {/* Customer Quick Chip */}
+          {(() => {
+            const isCustomerActive = persona?.type === 'customer';
+            return (
+              <button
+                type="button"
+                onClick={() => {
+                  if (!isCustomerActive) switchAccount('customer');
+                }}
+                className={`flex items-center gap-2 px-2.5 py-1 rounded-xl border text-xs font-bold transition-all shrink-0 cursor-pointer ${
+                  isCustomerActive
+                    ? 'bg-emerald-950/90 text-emerald-300 border-emerald-500 ring-1 ring-emerald-500 shadow-xs'
+                    : 'bg-slate-800/80 text-slate-300 border-slate-700/80 hover:bg-slate-800 hover:text-white'
+                }`}
+              >
+                <div className="relative">
+                  <img
+                    src={userProfile?.avatarUrl || 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=500'}
+                    alt="Customer"
+                    className="w-5 h-5 rounded-lg object-cover"
+                  />
+                  {isCustomerActive && (
+                    <span className="absolute -top-1 -right-1 w-2 h-2 bg-emerald-400 rounded-full" />
+                  )}
+                </div>
+                <span className="truncate max-w-[110px]">{userProfile?.name?.split(' ')[0] || 'Customer'}</span>
+                <span className="text-[9px] px-1 py-0.2 bg-amber-500/20 text-amber-300 rounded uppercase font-black">
+                  User
+                </span>
+                {isCustomerActive && <Check className="w-3 h-3 text-emerald-400 ml-0.5" />}
+              </button>
+            );
+          })()}
+
+          {/* Stores Quick Chips (up to 10) */}
+          {userStores.map(store => {
+            const isStoreActive = persona?.type === 'store' && persona?.storeId === store.storeId;
+            return (
+              <button
+                key={`chip-${store.storeId}`}
+                type="button"
+                onClick={() => {
+                  if (!isStoreActive) switchAccount(store.storeId, store.storeName, store.logoUrl);
+                }}
+                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-xl border text-xs font-bold transition-all shrink-0 cursor-pointer ${
+                  isStoreActive
+                    ? 'bg-emerald-950/90 text-emerald-300 border-emerald-500 ring-1 ring-emerald-500 shadow-xs'
+                    : 'bg-slate-800/80 text-slate-300 border-slate-700/80 hover:bg-slate-800 hover:text-white'
+                }`}
+              >
+                <div className="relative">
+                  <img
+                    src={store.logoUrl || 'https://images.unsplash.com/photo-1544441893-675973e31985?w=160'}
+                    alt={store.storeName}
+                    className="w-5 h-5 rounded-lg object-cover"
+                  />
+                  {isStoreActive && (
+                    <span className="absolute -top-1 -right-1 w-2 h-2 bg-emerald-400 rounded-full" />
+                  )}
+                </div>
+                <span className="truncate max-w-[120px]">{store.storeName}</span>
+                <VerifiedBadge size="xs" />
+                {isStoreActive && <Check className="w-3 h-3 text-emerald-400 ml-0.5" />}
+              </button>
+            );
+          })}
+
+          {/* Quick "+ New Store" Pill */}
+          {userStores.length < 10 && (
+            <button
+              type="button"
+              onClick={() => setShowNewStoreModal(!showNewStoreModal)}
+              className="flex items-center gap-1 px-2.5 py-1 rounded-xl border border-dashed border-slate-700 hover:border-emerald-500/80 bg-slate-800/40 hover:bg-slate-800 text-slate-400 hover:text-emerald-400 text-xs font-semibold shrink-0 transition-colors cursor-pointer"
+            >
+              <Plus className="w-3 h-3" />
+              <span>স্টোর যোগ</span>
+            </button>
+          )}
         </div>
       </div>
+
+      {/* Facebook-Style Account Switcher Modal / Bottom Sheet */}
+      {showSwitcherModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in duration-150">
+          <div
+            className="fixed inset-0"
+            onClick={() => setShowSwitcherModal(false)}
+          />
+          <div className="relative w-full max-w-md bg-slate-900 border border-slate-800 rounded-3xl shadow-2xl overflow-hidden z-10 animate-in zoom-in-95 duration-150">
+            {/* Modal Header */}
+            <div className="p-4 sm:p-5 border-b border-slate-800 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-xl bg-emerald-950 text-emerald-400 flex items-center justify-center border border-emerald-800/50">
+                  <ArrowLeftRight className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="font-extrabold text-sm text-white">Switch Profile / অ্যাকাউন্ট পরিবর্তন</h3>
+                  <p className="text-[11px] text-slate-400">
+                    মোট ১১টি অ্যাকাউন্ট ({userStores.length + 1}টি সক্রিয়: ১টি কাস্টমার + {userStores.length}টি স্টোর)
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowSwitcherModal(false)}
+                className="p-1.5 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Accounts List (Facebook-style vertical list) */}
+            <div className="p-3 sm:p-4 max-h-[60vh] overflow-y-auto space-y-2">
+              {/* Account #1: Customer Profile */}
+              {(() => {
+                const isCustomerActive = persona?.type === 'customer';
+                return (
+                  <div
+                    onClick={() => {
+                      switchAccount('customer');
+                      setShowSwitcherModal(false);
+                    }}
+                    className={`p-3 rounded-2xl border transition-all cursor-pointer flex items-center justify-between gap-3 ${
+                      isCustomerActive
+                        ? 'bg-emerald-950/60 border-emerald-500 ring-1 ring-emerald-500'
+                        : 'bg-slate-800/50 border-slate-700/60 hover:bg-slate-800 hover:border-slate-600'
+                    }`}
+                  >
+                    <div className="flex items-center gap-3 min-w-0">
+                      <img
+                        src={userProfile?.avatarUrl || 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=500'}
+                        alt="Customer"
+                        className="w-11 h-11 rounded-xl object-cover bg-slate-800 border-2 border-emerald-400 shrink-0"
+                      />
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <p className="font-bold text-xs text-white truncate">{userProfile?.name || 'Customer'}</p>
+                          <span className="px-1.5 py-0.2 bg-amber-500/20 text-amber-300 border border-amber-500/40 text-[8px] font-black rounded uppercase">
+                            Customer
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-slate-400 truncate mt-0.5">{userProfile?.email}</p>
+                      </div>
+                    </div>
+
+                    <div className="shrink-0">
+                      {isCustomerActive ? (
+                        <div className="w-6 h-6 rounded-full bg-emerald-500 text-slate-900 flex items-center justify-center font-bold">
+                          <Check className="w-3.5 h-3.5 stroke-[3]" />
+                        </div>
+                      ) : (
+                        <div className="w-6 h-6 rounded-full border-2 border-slate-600 hover:border-emerald-400" />
+                      )}
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* Accounts #2..11: Store Profiles */}
+              {userStores.map(store => {
+                const isStoreActive = persona?.type === 'store' && persona?.storeId === store.storeId;
+                return (
+                  <div
+                    key={`modal-store-${store.storeId}`}
+                    onClick={() => {
+                      switchAccount(store.storeId, store.storeName, store.logoUrl);
+                      setShowSwitcherModal(false);
+                    }}
+                    className={`p-3 rounded-2xl border transition-all cursor-pointer flex items-center justify-between gap-3 ${
+                      isStoreActive
+                        ? 'bg-emerald-950/60 border-emerald-500 ring-1 ring-emerald-500'
+                        : 'bg-slate-800/50 border-slate-700/60 hover:bg-slate-800 hover:border-slate-600'
+                    }`}
+                  >
+                    <div className="flex items-center gap-3 min-w-0">
+                      <img
+                        src={store.logoUrl || 'https://images.unsplash.com/photo-1544441893-675973e31985?w=160'}
+                        alt={store.storeName}
+                        className="w-11 h-11 rounded-xl object-cover bg-slate-800 border border-slate-700 shrink-0"
+                      />
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <p className="font-bold text-xs text-white truncate">{store.storeName}</p>
+                          <VerifiedBadge size="sm" />
+                          <span className="px-1.5 py-0.2 bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 text-[8px] font-black rounded uppercase">
+                            Store
+                          </span>
+                        </div>
+                        <p className="text-[10px] text-slate-400 font-mono truncate mt-0.5">/stores/{store.storeSlug}</p>
+                      </div>
+                    </div>
+
+                    <div className="shrink-0">
+                      {isStoreActive ? (
+                        <div className="w-6 h-6 rounded-full bg-emerald-500 text-slate-900 flex items-center justify-center font-bold">
+                          <Check className="w-3.5 h-3.5 stroke-[3]" />
+                        </div>
+                      ) : (
+                        <div className="w-6 h-6 rounded-full border-2 border-slate-600 hover:border-emerald-400" />
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="p-3 sm:p-4 bg-slate-950/60 border-t border-slate-800 flex items-center justify-between gap-2">
+              {userStores.length < 10 ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowSwitcherModal(false);
+                    setShowNewStoreModal(true);
+                  }}
+                  className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold transition-colors flex items-center justify-center gap-1.5 cursor-pointer shadow-xs"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>+ Open Another Store ({userStores.length}/10)</span>
+                </button>
+              ) : (
+                <p className="text-[11px] text-center w-full text-amber-400 font-bold">
+                  সর্বোচ্চ ১০টি স্টোর তৈরি সম্পন্ন হয়েছে (10/10 Stores Limit Reached)
+                </p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Embedded New Store Registration Form (When "+ Open Another Store" is clicked) */}
+      {showNewStoreModal && renderStoreRegistrationForm(true)}
+
+      {/* If persona is Customer, show Customer Account Info Panel (NO product upload or store dashboard) */}
+      {persona?.type === 'customer' ? (
+        <div className="space-y-6">
+          {/* Customer Overview Card */}
+          <div className="bg-white rounded-3xl border border-slate-200/80 p-5 sm:p-7 shadow-xs">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 pb-5 border-b border-slate-100">
+              <div className="flex items-center gap-4">
+                <img
+                  src={userProfile?.avatarUrl || 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=500'}
+                  alt={userProfile?.name || 'Customer'}
+                  className="w-16 h-16 rounded-2xl object-cover border-2 border-emerald-500 shadow-xs shrink-0"
+                />
+                <div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h2 className="text-lg sm:text-xl font-black text-slate-900">{userProfile?.name || 'Customer Account'}</h2>
+                    <span className="px-2.5 py-0.5 bg-amber-100 text-amber-800 text-[10px] font-extrabold rounded-full uppercase">
+                      Customer
+                    </span>
+                    <span className="px-2.5 py-0.5 bg-emerald-100 text-emerald-800 text-[10px] font-extrabold rounded-full uppercase flex items-center gap-1">
+                      <Check className="w-3 h-3" />
+                      Connected / সক্রিয়
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-500 mt-1 font-medium">
+                    {userProfile?.email}
+                    {userProfile?.phone && <> • {userProfile.phone}</>}
+                  </p>
+                </div>
+              </div>
+
+              {/* Action buttons for Customer */}
+              <div className="flex flex-wrap gap-2 w-full sm:w-auto">
+                <button
+                  type="button"
+                  onClick={() => onNavigate && onNavigate('/')}
+                  className="px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl text-xs font-bold transition-colors shadow-xs flex items-center gap-1.5 cursor-pointer"
+                >
+                  <ShoppingBag className="w-3.5 h-3.5" />
+                  <span>পণ্য কিনুন (Shop Products)</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onNavigate && onNavigate('/profile')}
+                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-xl text-xs font-bold transition-colors flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Package className="w-3.5 h-3.5" />
+                  <span>আমার অর্ডার (My Orders)</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Informational Notice */}
+            <div className="mt-5 p-4 rounded-2xl bg-amber-50/90 border border-amber-200/70 text-xs">
+              <div className="flex items-start gap-3">
+                <div className="p-2 bg-amber-100 rounded-xl text-amber-800 shrink-0 mt-0.5">
+                  <AlertCircle className="w-4 h-4" />
+                </div>
+                <div>
+                  <h4 className="font-bold text-amber-900 text-xs sm:text-sm">কাস্টমার অ্যাকাউন্ট মোড (Customer Mode)</h4>
+                  <p className="text-amber-800/90 mt-1 leading-relaxed">
+                    এটি আপনার ব্যক্তিগত কাস্টমার অ্যাকাউন্ট। কাস্টমার অ্যাকাউন্টে কোনো প্রোডাক্ট আপলোড করা যায় না এবং এটি কোনো মার্চেন্ট স্টোর হিসেবে সাইটে গণ্য হয় না। এখান থেকে আপনি সোদাইপুর প্ল্যাটফর্মের পণ্য ব্রাউজ, অর্ডার ও ট্র্যাকিং করতে পারবেন।
+                  </p>
+                  <p className="text-amber-900 font-semibold mt-2">
+                    👉 প্রোডাক্ট আপলোড করতে বা আপনার স্টোর পরিচালনা করতে উপরের তালিকা থেকে আপনার যেকোনো সেলার স্টোরে <span className="font-bold text-emerald-800">"কানেক্ট করুন (Connect)"</span> ক্লিক করুন।
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Quick Switch to User's Stores */}
+            {userStores.length > 0 && (
+              <div className="mt-6">
+                <h3 className="text-xs font-bold text-slate-700 uppercase tracking-wider mb-3">
+                  আপনার সেলার স্টোরসমূহ ({userStores.length}টি স্টোর):
+                </h3>
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                  {userStores.map(store => (
+                    <div
+                      key={`quick-${store.storeId}`}
+                      className="p-3 rounded-2xl border border-slate-200 hover:border-emerald-500 bg-slate-50/60 hover:bg-emerald-50/40 transition-all flex items-center justify-between gap-3"
+                    >
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <img
+                          src={store.logoUrl || 'https://images.unsplash.com/photo-1544441893-675973e31985?w=160'}
+                          alt={store.storeName}
+                          className="w-10 h-10 rounded-xl object-cover border border-slate-200 shrink-0"
+                        />
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-1">
+                            <p className="font-bold text-xs text-slate-800 truncate">{store.storeName}</p>
+                            <VerifiedBadge size="sm" />
+                          </div>
+                          <p className="text-[10px] text-slate-400 font-mono truncate">/stores/{store.storeSlug}</p>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => switchAccount(store.storeId, store.storeName, store.logoUrl)}
+                        className="px-3 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl text-xs font-bold shrink-0 transition-colors cursor-pointer shadow-2xs"
+                      >
+                        কানেক্ট করুন
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      ) : (
+        <>
+          {/* Top Banner & Header of Currently Active / Selected Store */}
+          <div className="bg-white rounded-3xl border border-slate-200/80 p-4 sm:p-6 shadow-xs flex flex-wrap items-center justify-between gap-4">
+            <div className="flex items-center gap-4">
+              <img
+                src={myStore.logoUrl || 'https://images.unsplash.com/photo-1544441893-675973e31985?w=160'}
+                alt={myStore.storeName}
+                className="w-14 h-14 rounded-2xl object-cover border border-slate-200 shadow-xs"
+              />
+              <div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h1 className="text-base sm:text-xl font-black text-slate-900 leading-tight">
+                    <VerifiedStoreName name={myStore.storeName} badgeSize="md" />
+                  </h1>
+                  <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 text-[10px] font-extrabold rounded-full uppercase flex items-center gap-1">
+                    <Check className="w-3 h-3" />
+                    Store Connected
+                  </span>
+                </div>
+                <p className="text-xs text-slate-400 font-mono mt-0.5">
+                  slug: /stores/{myStore.storeSlug} • {myProducts.length} listings
+                </p>
+              </div>
+            </div>
+
+            {/* Tab Navigation Pill Bar */}
+            <div className="flex flex-wrap gap-1.5 bg-slate-100 p-1.5 rounded-2xl text-xs font-bold">
+              <button
+                onClick={() => setActiveTab('overview')}
+                className={`px-3 py-1.5 rounded-xl transition-all ${
+                  activeTab === 'overview' ? 'bg-white text-emerald-800 shadow-xs' : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                Overview
+              </button>
+              <button
+                onClick={() => setActiveTab('inventory')}
+                className={`px-3 py-1.5 rounded-xl transition-all ${
+                  activeTab === 'inventory' ? 'bg-white text-emerald-800 shadow-xs' : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                Inventory ({myProducts.length})
+              </button>
+              <button
+                onClick={() => setActiveTab('new_product')}
+                className={`px-3 py-1.5 rounded-xl transition-all flex items-center gap-1 ${
+                  activeTab === 'new_product' ? 'bg-emerald-700 text-white shadow-xs' : 'text-emerald-700 hover:bg-white'
+                }`}
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>Add Product</span>
+              </button>
+              <button
+                onClick={() => setActiveTab('orders')}
+                className={`px-3 py-1.5 rounded-xl transition-all ${
+                  activeTab === 'orders' ? 'bg-white text-emerald-800 shadow-xs' : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                Orders ({storeOrders.length})
+              </button>
+              <button
+                onClick={() => {
+                  if (onNavigate) {
+                    onNavigate('/chat');
+                  } else {
+                    setActiveTab('chat');
+                  }
+                }}
+                className={`px-3 py-1.5 rounded-xl transition-all flex items-center gap-1 cursor-pointer ${
+                  activeTab === 'chat' ? 'bg-white text-emerald-800 shadow-xs' : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <MessageSquare className="w-3.5 h-3.5" />
+                <span>Buyer Chat</span>
+              </button>
+            </div>
+          </div>
 
       {/* Tab: Overview Analytics */}
       {activeTab === 'overview' && (
@@ -848,6 +1380,8 @@ export const SellerDashboardPage: React.FC<SellerDashboardProps> = ({
           </div>
           <RealtimeChat stores={stores} />
         </div>
+      )}
+        </>
       )}
     </div>
   );

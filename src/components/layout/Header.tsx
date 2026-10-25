@@ -34,7 +34,7 @@ export const Header: React.FC<HeaderProps> = ({
   onNavigate,
   onOpenAuth
 }) => {
-  const { currentUser, userProfile, logout } = useAuth();
+  const { currentUser, userProfile, persona, logout } = useAuth();
   const { itemCount, setIsCartOpen } = useCart();
   const { lang, setLang, t } = useLanguage();
 
@@ -251,9 +251,35 @@ export const Header: React.FC<HeaderProps> = ({
             )}
           </div>
 
-          {/* Right Action Icons (Chat, Cart, User - Shown on desktop, mobile has dedicated bottom nav and floating cart) */}
+          {/* Mobile & Tablet Connected Account Avatar Button (Visible on mobile/tablet) */}
+          <div className="xl:hidden flex items-center gap-1.5 shrink-0">
+            {userProfile ? (
+              <button
+                onClick={() => onNavigate('/profile')}
+                className="p-1 rounded-full border border-slate-200 hover:bg-slate-100 transition-colors flex items-center justify-center cursor-pointer bg-white shadow-2xs"
+                title={persona?.name || 'My Account'}
+              >
+                <div className="w-8 h-8 rounded-full bg-emerald-100 text-emerald-800 font-black text-xs flex items-center justify-center overflow-hidden border border-emerald-300">
+                  {persona?.avatarUrl ? (
+                    <img src={persona.avatarUrl} alt={persona.name} className="w-full h-full object-cover" />
+                  ) : (
+                    persona?.name?.charAt(0).toUpperCase() || 'U'
+                  )}
+                </div>
+              </button>
+            ) : (
+              <button
+                onClick={onOpenAuth}
+                className="px-2.5 py-1 bg-emerald-700 text-white font-bold text-xs rounded-xl shadow-xs"
+              >
+                Login
+              </button>
+            )}
+          </div>
+
+          {/* Right Action Icons (Desktop xl:flex) */}
           <div className="hidden xl:flex items-center gap-2 shrink-0">
-            {/* Direct Chat icon (Hidden on mobile phones where bottom navigation already has Chat) */}
+            {/* Direct Chat icon */}
             <button
               onClick={() => {
                 if (!currentUser) {
@@ -268,7 +294,7 @@ export const Header: React.FC<HeaderProps> = ({
               <MessageSquare className="w-5 h-5" />
             </button>
 
-            {/* Shopping Cart button with dynamic badge (Hidden on mobile phones, shown on desktop) */}
+            {/* Shopping Cart button with dynamic badge */}
             <button
               onClick={() => setIsCartOpen(true)}
               className="hidden xl:flex p-2 rounded-full hover:bg-slate-100 text-slate-700 relative transition-colors cursor-pointer items-center justify-center"
@@ -287,28 +313,48 @@ export const Header: React.FC<HeaderProps> = ({
                 <div>
                   <button
                     onClick={() => setShowUserMenu(!showUserMenu)}
-                    className="flex items-center gap-1.5 p-1.5 rounded-full hover:bg-slate-100 transition-colors border border-slate-200 cursor-pointer"
+                    className="flex items-center gap-1.5 p-1 rounded-full hover:bg-slate-100 transition-colors border border-slate-200 cursor-pointer"
                   >
-                    <div className="w-7 h-7 rounded-full bg-emerald-100 text-emerald-800 font-black text-xs flex items-center justify-center">
-                      {userProfile.name?.charAt(0).toUpperCase() || 'U'}
+                    <div className="w-7 h-7 rounded-full bg-emerald-100 text-emerald-800 font-black text-xs flex items-center justify-center overflow-hidden border border-emerald-300">
+                      {persona?.avatarUrl ? (
+                        <img src={persona.avatarUrl} alt={persona.name} className="w-full h-full object-cover" />
+                      ) : (
+                        persona?.name?.charAt(0).toUpperCase() || 'U'
+                      )}
                     </div>
                     <ChevronDown className="w-3.5 h-3.5 text-slate-400 hidden sm:block mr-1" />
                   </button>
 
                   {showUserMenu && (
-                    <div className="absolute right-0 mt-2 w-56 bg-white rounded-2xl shadow-xl border border-slate-100 py-2 z-50 animate-in fade-in">
+                    <div className="absolute right-0 mt-2 w-64 bg-white rounded-2xl shadow-xl border border-slate-100 py-2 z-50 animate-in fade-in">
                       <div className="px-4 py-2 border-b border-slate-100">
-                        <p className="text-xs font-bold text-slate-800 truncate">{userProfile.name}</p>
-                        <p className="text-[11px] text-slate-400 truncate">{userProfile.email}</p>
-                        <span className={`inline-block mt-1 text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-full ${
-                          userProfile.role === 'admin' 
-                            ? 'bg-rose-100 text-rose-700' 
-                            : userProfile.role === 'owner' 
-                            ? 'bg-blue-100 text-blue-700' 
-                            : 'bg-emerald-100 text-emerald-800'
-                        }`}>
-                          {userProfile.role}
-                        </span>
+                        <div className="flex items-center gap-2 mb-1">
+                          {persona?.avatarUrl ? (
+                            <img src={persona.avatarUrl} alt="Avatar" className="w-8 h-8 rounded-full object-cover border border-slate-200" />
+                          ) : (
+                            <div className="w-8 h-8 rounded-full bg-emerald-100 text-emerald-800 font-bold flex items-center justify-center text-xs">
+                              {persona?.name?.charAt(0).toUpperCase() || 'U'}
+                            </div>
+                          )}
+                          <div className="min-w-0 flex-1">
+                            <p className="text-xs font-bold text-slate-800 truncate">{persona?.name}</p>
+                            <p className="text-[10px] text-slate-400 truncate">{persona?.email}</p>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-1.5 flex-wrap mt-1">
+                          <span className={`text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-full ${
+                            persona?.type === 'store' 
+                              ? 'bg-blue-100 text-blue-700' 
+                              : 'bg-emerald-100 text-emerald-800'
+                          }`}>
+                            {persona?.roleLabel}
+                          </span>
+                          {userProfile.role === 'admin' && (
+                            <span className="text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-full bg-rose-100 text-rose-700">
+                              Admin
+                            </span>
+                          )}
+                        </div>
                       </div>
 
                       <button
@@ -327,15 +373,13 @@ export const Header: React.FC<HeaderProps> = ({
                         <span>My Orders</span>
                       </button>
 
-                      {userProfile.role === 'owner' && (
-                        <button
-                          onClick={() => { setShowUserMenu(false); onNavigate('/seller/dashboard'); }}
-                          className="w-full text-left px-4 py-2 text-xs font-bold text-blue-700 hover:bg-blue-50 flex items-center gap-2"
-                        >
-                          <Store className="w-4 h-4 text-blue-600" />
-                          <span>Seller Dashboard</span>
-                        </button>
-                      )}
+                      <button
+                        onClick={() => { setShowUserMenu(false); onNavigate('/seller/dashboard'); }}
+                        className="w-full text-left px-4 py-2 text-xs font-bold text-blue-700 hover:bg-blue-50 flex items-center gap-2"
+                      >
+                        <Store className="w-4 h-4 text-blue-600" />
+                        <span>Seller Center {userProfile.storeIds ? `(${userProfile.storeIds.length} Stores)` : ''}</span>
+                      </button>
 
                       {userProfile.role === 'admin' && (
                         <button

@@ -2,6 +2,7 @@ import express from 'express';
 import path from 'path';
 import fs from 'fs';
 import dotenv from 'dotenv';
+import crypto from 'crypto';
 import { fileURLToPath } from 'url';
 
 dotenv.config();
@@ -171,6 +172,86 @@ async function startServer() {
   // Healthcheck for Google Cloud Run / Render
   app.get('/health', (_req, res) => {
     res.status(200).send('OK');
+  });
+
+  // ---------------- CLOUDINARY MEDIA DELETION API ---------------- //
+  const CLOUDINARY_CLOUD_NAME = 
+    process.env.CLOUDINARY_CLOUD_NAME || 
+    process.env.VITE_CLOUDINARY_CLOUD_NAME || 
+    process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME || 
+    'demo';
+  const CLOUDINARY_API_KEY = process.env.CLOUDINARY_API_KEY || process.env.VITE_CLOUDINARY_API_KEY;
+  const CLOUDINARY_API_SECRET = process.env.CLOUDINARY_API_SECRET || process.env.VITE_CLOUDINARY_API_SECRET;
+
+  async function destroyCloudinaryAsset(publicId: string, resourceType: string = 'image') {
+    if (!CLOUDINARY_API_KEY || !CLOUDINARY_API_SECRET || !CLOUDINARY_CLOUD_NAME || CLOUDINARY_CLOUD_NAME === 'demo') {
+      console.warn(`[Cloudinary Destroy] Notice: Cannot delete asset "${publicId}". CLOUDINARY_API_KEY and CLOUDINARY_API_SECRET must be configured in Render environment variables.`);
+      return { success: false, reason: 'credentials_missing', publicId };
+    }
+    try {
+      const timestamp = Math.floor(Date.now() / 1000);
+      const toSign = `public_id=${publicId}&timestamp=${timestamp}${CLOUDINARY_API_SECRET}`;
+      const signature = crypto.createHash('sha1').update(toSign).digest('hex');
+
+      const formData = new URLSearchParams();
+      formData.append('public_id', publicId);
+      formData.append('timestamp', timestamp.toString());
+      formData.append('api_key', CLOUDINARY_API_KEY);
+      formData.append('signature', signature);
+
+      const endpoint = `https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/${resourceType}/destroy`;
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: formData.toString()
+      });
+
+      const data = await response.json().catch(() => ({}));
+      console.log(`[Cloudinary Destroy] Asset "${publicId}" (${resourceType}):`, data.result || data);
+      return { success: response.ok, result: data.result || 'ok', publicId };
+    } catch (err: any) {
+      console.error(`[Cloudinary Destroy Error] Failed to delete "${publicId}":`, err.message || err);
+      return { success: false, error: err.message || String(err), publicId };
+    }
+  }
+
+  // Cloudinary Delete Single Asset API Endpoint
+  app.post('/api/cloudinary/delete', async (req, res) => {
+    const { publicId, resourceType } = req.body || {};
+    if (!publicId) {
+      return res.status(400).json({ error: 'publicId is required' });
+    }
+    const result = await destroyCloudinaryAsset(publicId, resourceType || 'image');
+    return res.json(result);
+  });
+
+  // Cloudinary Delete Multiple Assets API Endpoint (Batch)
+  app.post('/api/cloudinary/delete-multiple', async (req, res) => {
+    const { items } = req.body || {};
+    if (!Array.isArray(items) || items.length === 0) {
+      return res.json({ deletedCount: 0, errorsCount: 0, items: [] });
+    }
+
+    const results = await Promise.allSettled(
+      items.map((item: any) => destroyCloudinaryAsset(item.publicId, item.resourceType || 'image'))
+    );
+
+    let deletedCount = 0;
+    let errorsCount = 0;
+    results.forEach(r => {
+      if (r.status === 'fulfilled' && r.value.success) {
+        deletedCount++;
+      } else {
+        errorsCount++;
+      }
+    });
+
+    return res.json({
+      success: true,
+      deletedCount,
+      errorsCount,
+      results: results.map(r => r.status === 'fulfilled' ? r.value : { success: false })
+    });
   });
 
   let vite: any;

@@ -12,9 +12,11 @@ import {
   Plus, 
   Layers, 
   Image as ImageIcon,
-  AlertTriangle
+  AlertTriangle,
+  RefreshCw,
+  UserX
 } from 'lucide-react';
-import type { Category, Store, Product, Banner } from '../types';
+import type { Category, Store, Product, Banner, UserProfile } from '../types';
 import { VerifiedBadge } from '../components/common/VerifiedBadge';
 import { 
   updateStoreStatus, 
@@ -23,7 +25,11 @@ import {
   addCategory, 
   deleteCategory, 
   addBanner, 
-  deleteBanner 
+  deleteBanner,
+  getAllUsers,
+  deleteUserCascade,
+  deleteStoreWithProducts,
+  cleanOrphanedStoresAndProducts
 } from '../lib/firestoreService';
 import { slugify } from '../lib/slugify';
 import { useAuth } from '../context/AuthContext';
@@ -44,7 +50,13 @@ export const AdminPage: React.FC<AdminPageProps> = ({
   onNavigateProduct
 }) => {
   const { userProfile } = useAuth();
-  const [adminTab, setAdminTab] = useState<'analytics' | 'stores' | 'products' | 'taxonomy' | 'banners'>('analytics');
+  const [adminTab, setAdminTab] = useState<'analytics' | 'users' | 'stores' | 'products' | 'taxonomy' | 'banners'>('analytics');
+  
+  // Users state
+  const [usersList, setUsersList] = useState<UserProfile[]>([]);
+  const [usersLoading, setUsersLoading] = useState(false);
+  const [cleanStatus, setCleanStatus] = useState<string | null>(null);
+  const [isCleaning, setIsCleaning] = useState(false);
 
   // Category creation form state
   const [newCatName, setNewCatName] = useState('');
@@ -61,6 +73,75 @@ export const AdminPage: React.FC<AdminPageProps> = ({
 
   // Protect Admin route
   const isAdmin = userProfile?.role === 'admin' || userProfile?.email === 'admin@sodaipur.com';
+
+  const loadUsers = async () => {
+    setUsersLoading(true);
+    try {
+      const list = await getAllUsers();
+      setUsersList(list);
+    } catch (e) {
+      console.warn('Failed to load users:', e);
+    } finally {
+      setUsersLoading(false);
+    }
+  };
+
+  React.useEffect(() => {
+    if (adminTab === 'users' || adminTab === 'analytics') {
+      loadUsers();
+    }
+  }, [adminTab]);
+
+  const handleCascadeDeleteUser = async (user: UserProfile) => {
+    const storeInfo = user.storeId ? ` এবং তার স্টোর (${user.storeId}) ও সকল প্রোডাক্ট` : '';
+    const confirm = window.confirm(
+      `সতর্কতা: আপনি কি নিশ্চিত যে ইউজার "${user.name || user.email}"${storeInfo} ও সংশ্লিষ্ট সকল চ্যাট ফায়ারবেস থেকে স্থায়ীভাবে ডিলিট করতে চান? (Cascade Delete: User + Store + Products + Chats)`
+    );
+    if (!confirm) return;
+
+    try {
+      const res = await deleteUserCascade(user.uid, user.storeId);
+      alert(`ইউজার সফলভাবে ডিলিট করা হয়েছে! ${res.storeDeleted ? 'স্টোর, ' : ''}${res.deletedProductsCount} টি প্রোডাক্ট এবং ${res.deletedChatsCount || 0} টি চ্যাট থ্রেড ও মেসেজ ডাটাবেস থেকে রিমুভ করা হয়েছে।`);
+      await loadUsers();
+    } catch (err) {
+      console.error('Error deleting user:', err);
+      alert('ডিলিট করতে সমস্যা হয়েছে: ' + (err as Error).message);
+    }
+  };
+
+  const handleDeleteStoreCascade = async (storeId: string, storeName: string) => {
+    const confirm = window.confirm(
+      `আপনি কি নিশ্চিত যে "${storeName}" স্টোর, এর সকল প্রোডাক্ট ও সংশ্লিষ্ট সকল চ্যাট স্থায়ীভাবে ফায়ারবেস থেকে ডিলিট করতে চান?`
+    );
+    if (!confirm) return;
+
+    try {
+      const res = await deleteStoreWithProducts(storeId);
+      alert(`স্টোর, ${res.deletedProductsCount} টি প্রোডাক্ট এবং ${res.deletedChatsCount || 0} টি চ্যাট সফলভাবে ডিলিট করা হয়েছে!`);
+    } catch (err) {
+      console.error('Error deleting store:', err);
+      alert('স্টোর ডিলিট করতে সমস্যা হয়েছে: ' + (err as Error).message);
+    }
+  };
+
+  const handleRunOrphanCleanup = async () => {
+    setIsCleaning(true);
+    setCleanStatus('অরফান ডাটা স্ক্যান করা হচ্ছে...');
+    try {
+      const res = await cleanOrphanedStoresAndProducts();
+      if (res.orphanedStoresCleaned > 0 || res.orphanedProductsCleaned > 0 || (res.orphanedChatsCleaned && res.orphanedChatsCleaned > 0)) {
+        setCleanStatus(`সফল: ${res.orphanedStoresCleaned} টি পরিত্যক্ত স্টোর, ${res.orphanedProductsCleaned} টি পরিত্যক্ত প্রোডাক্ট এবং ${res.orphanedChatsCleaned || 0} টি পরিত্যক্ত চ্যাট ক্লিন করা হয়েছে!`);
+      } else {
+        setCleanStatus('কোনো অরফান বা পরিত্যক্ত স্টোর/প্রোডাক্ট/চ্যাট পাওয়া যায়নি। ডাটাবেস সম্পূর্ণ সুবিন্যস্ত আছে!');
+      }
+      await loadUsers();
+    } catch (err) {
+      setCleanStatus('স্ক্যান করতে ত্রুটি: ' + (err as Error).message);
+    } finally {
+      setIsCleaning(false);
+      setTimeout(() => setCleanStatus(null), 6000);
+    }
+  };
 
   const handleToggleStoreStatus = async (storeId: string, currentStatus: 'active' | 'suspended') => {
     const next = currentStatus === 'active' ? 'suspended' : 'active';
@@ -153,7 +234,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({
         </div>
 
         {/* Tab switcher */}
-        <div className="flex flex-wrap gap-1.5 bg-slate-800 p-1.5 rounded-2xl text-xs font-bold">
+        <div className="flex flex-wrap items-center gap-1.5 bg-slate-800 p-1.5 rounded-2xl text-xs font-bold">
           <button
             onClick={() => setAdminTab('analytics')}
             className={`px-3 py-1.5 rounded-xl transition-all ${
@@ -161,6 +242,15 @@ export const AdminPage: React.FC<AdminPageProps> = ({
             }`}
           >
             Analytics
+          </button>
+          <button
+            onClick={() => setAdminTab('users')}
+            className={`px-3 py-1.5 rounded-xl transition-all flex items-center gap-1.5 ${
+              adminTab === 'users' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-300 hover:text-white'
+            }`}
+          >
+            <Users className="w-3.5 h-3.5" />
+            Users & Merchants ({usersList.length})
           </button>
           <button
             onClick={() => setAdminTab('stores')}
@@ -194,8 +284,31 @@ export const AdminPage: React.FC<AdminPageProps> = ({
           >
             Banners ({banners.length})
           </button>
+          
+          <button
+            onClick={handleRunOrphanCleanup}
+            disabled={isCleaning}
+            title="Scan & Purge Orphaned Stores/Products from Firebase"
+            className="px-2.5 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white transition-all flex items-center gap-1 text-[11px] font-bold shrink-0 ml-1 shadow-xs disabled:opacity-50"
+          >
+            <RefreshCw className={`w-3 h-3 ${isCleaning ? 'animate-spin' : ''}`} />
+            {isCleaning ? 'Cleaning...' : 'Orphan Cleaner'}
+          </button>
         </div>
       </div>
+
+      {/* Clean Status Banner */}
+      {cleanStatus && (
+        <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 px-4 py-3 rounded-2xl text-xs font-semibold flex items-center justify-between shadow-xs animate-in fade-in">
+          <div className="flex items-center gap-2">
+            <Check className="w-4 h-4 text-emerald-600 shrink-0" />
+            <span>{cleanStatus}</span>
+          </div>
+          <button onClick={() => setCleanStatus(null)} className="text-emerald-600 hover:text-emerald-900">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
 
       {/* Tab: Analytics */}
       {adminTab === 'analytics' && (
@@ -236,6 +349,129 @@ export const AdminPage: React.FC<AdminPageProps> = ({
               <p className="text-2xl font-black text-emerald-700">৳2,450,000</p>
               <span className="text-[10px] text-emerald-700 font-bold">Total revenue across stores</span>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Tab: Users & Merchants Moderation with Cascade Delete */}
+      {adminTab === 'users' && (
+        <div className="bg-white rounded-3xl border border-slate-200 shadow-xs overflow-hidden space-y-0">
+          <div className="p-4 border-b border-slate-100 flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h3 className="font-bold text-sm text-slate-800 flex items-center gap-2">
+                <Users className="w-4 h-4 text-emerald-700" />
+                প্ল্যাটফর্ম ইউজার ও মার্চেন্ট ম্যানেজমেন্ট (Platform Users & Cascade Governance)
+              </h3>
+              <p className="text-[11px] text-slate-500">
+                ইউজার ডিলিট করলে তার স্টোর এবং আপলোড করা সকল প্রোডাক্ট স্বয়ংক্রিয়ভাবে ফায়ারবেস থেকে মুছে যাবে (Cascade Delete)।
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={loadUsers}
+                disabled={usersLoading}
+                className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold flex items-center gap-1.5"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${usersLoading ? 'animate-spin' : ''}`} />
+                রিলোড ইউজার
+              </button>
+              <button
+                onClick={handleRunOrphanCleanup}
+                disabled={isCleaning}
+                className="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded-xl text-xs font-bold flex items-center gap-1.5"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${isCleaning ? 'animate-spin' : ''}`} />
+                অরফান ডাটা ক্লিন
+              </button>
+            </div>
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs">
+              <thead className="bg-slate-50 text-slate-500 font-bold uppercase text-[10px]">
+                <tr>
+                  <th className="p-3.5">User</th>
+                  <th className="p-3.5">Email</th>
+                  <th className="p-3.5">Role</th>
+                  <th className="p-3.5">Linked Store</th>
+                  <th className="p-3.5">Products</th>
+                  <th className="p-3.5 text-right">Cascade Action</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {usersList.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="p-8 text-center text-slate-400">
+                      {usersLoading ? 'ইউজার লোড হচ্ছে...' : 'কোনো ইউজার পাওয়া যায়নি।'}
+                    </td>
+                  </tr>
+                ) : (
+                  usersList.map(u => {
+                    const userStore = stores.find(s => s.storeId === u.storeId || s.ownerUid === u.uid);
+                    const userProductsCount = products.filter(
+                      p => (u.storeId && p.storeId === u.storeId) || (userStore && p.storeId === userStore.storeId) || p.ownerUid === u.uid
+                    ).length;
+
+                    return (
+                      <tr key={u.uid} className="hover:bg-slate-50">
+                        <td className="p-3.5">
+                          <div className="flex items-center gap-2.5">
+                            <div className="w-8 h-8 rounded-full bg-slate-200 text-slate-700 font-bold flex items-center justify-center text-xs shrink-0">
+                              {(u.name || u.email || 'U').charAt(0).toUpperCase()}
+                            </div>
+                            <div>
+                              <p className="font-bold text-slate-800">{u.name || 'Unnamed User'}</p>
+                              <p className="text-[10px] font-mono text-slate-400 truncate max-w-[150px]">UID: {u.uid}</p>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="p-3.5 font-medium text-slate-600">{u.email}</td>
+                        <td className="p-3.5">
+                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${
+                            u.role === 'admin'
+                              ? 'bg-rose-100 text-rose-800'
+                              : u.role === 'owner'
+                              ? 'bg-emerald-100 text-emerald-800'
+                              : 'bg-blue-100 text-blue-800'
+                          }`}>
+                            {u.role || 'customer'}
+                          </span>
+                        </td>
+                        <td className="p-3.5">
+                          {userStore ? (
+                            <div className="flex items-center gap-1.5">
+                              <span className="font-semibold text-slate-800">{userStore.storeName}</span>
+                              <span className="text-[10px] font-mono text-slate-400">({userStore.storeId})</span>
+                            </div>
+                          ) : u.storeId ? (
+                            <span className="text-[10px] font-mono text-slate-500">{u.storeId}</span>
+                          ) : (
+                            <span className="text-slate-400 text-[11px]">No Store</span>
+                          )}
+                        </td>
+                        <td className="p-3.5 font-bold text-slate-700">
+                          {userProductsCount > 0 ? (
+                            <span className="text-emerald-700">{userProductsCount} items</span>
+                          ) : (
+                            <span className="text-slate-400">0 items</span>
+                          )}
+                        </td>
+                        <td className="p-3.5 text-right">
+                          <button
+                            onClick={() => handleCascadeDeleteUser(u)}
+                            className="px-2.5 py-1 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-700 font-bold text-xs flex items-center gap-1 ml-auto"
+                            title="Delete this user, their store, and all products"
+                          >
+                            <UserX className="w-3.5 h-3.5" />
+                            Cascade Delete
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
           </div>
         </div>
       )}
@@ -287,16 +523,25 @@ export const AdminPage: React.FC<AdminPageProps> = ({
                       </span>
                     </td>
                     <td className="p-3.5 text-right">
-                      <button
-                        onClick={() => handleToggleStoreStatus(store.storeId, store.status)}
-                        className={`px-3 py-1 rounded-lg font-bold text-xs ${
-                          store.status === 'active' 
-                            ? 'bg-rose-50 text-rose-700 hover:bg-rose-100' 
-                            : 'bg-emerald-50 text-emerald-800 hover:bg-emerald-100'
-                        }`}
-                      >
-                        {store.status === 'active' ? 'Suspend' : 'Activate'}
-                      </button>
+                      <div className="flex items-center justify-end gap-1.5">
+                        <button
+                          onClick={() => handleToggleStoreStatus(store.storeId, store.status)}
+                          className={`px-2.5 py-1 rounded-lg font-bold text-xs ${
+                            store.status === 'active' 
+                              ? 'bg-amber-50 text-amber-700 hover:bg-amber-100' 
+                              : 'bg-emerald-50 text-emerald-800 hover:bg-emerald-100'
+                          }`}
+                        >
+                          {store.status === 'active' ? 'Suspend' : 'Activate'}
+                        </button>
+                        <button
+                          onClick={() => handleDeleteStoreCascade(store.storeId, store.storeName)}
+                          className="p-1 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50"
+                          title="Delete Store and all its Products"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}

@@ -12,12 +12,14 @@ import {
   onSnapshot,
   serverTimestamp,
   addDoc,
-  arrayUnion
+  arrayUnion,
+  writeBatch
 } from 'firebase/firestore';
 import { db } from './firebase';
 import type { Category, Store, Product, ChatThread, ChatMessage, Order, Banner, UserProfile, CartItem } from '../types';
 import { INITIAL_CATEGORIES, INITIAL_STORES, INITIAL_PRODUCTS, INITIAL_BANNERS } from './seedData';
 import { generateStoreSlug, generateProductSlug } from './slugify';
+import { deleteFromCloudinary, deleteMultipleFromCloudinary } from './cloudinary';
 
 /**
  * Initialize seed data in Firestore if not present
@@ -93,6 +95,17 @@ export async function addCategory(cat: Omit<Category, 'categoryId'>): Promise<Ca
 }
 
 export async function deleteCategory(categoryId: string): Promise<void> {
+  try {
+    const snap = await getDoc(doc(db, 'categories', categoryId));
+    if (snap.exists()) {
+      const data = snap.data() as Category;
+      if (data.iconUrl) {
+        deleteFromCloudinary(data.iconUrl).catch(() => {});
+      }
+    }
+  } catch (e) {
+    console.warn('Notice in deleteCategory media cleanup:', e);
+  }
   await deleteDoc(doc(db, 'categories', categoryId));
 }
 
@@ -231,13 +244,56 @@ export async function createStore(
 
   await setDoc(doc(db, 'stores', storeId), newStore);
   
-  // Update user profile with role='owner' and storeId
-  await updateDoc(doc(db, 'users', ownerUid), {
-    role: 'owner',
-    storeId
-  });
+  // Update user profile with role='owner' and multi-store mapping (up to 10 stores)
+  try {
+    const userDocRef = doc(db, 'users', ownerUid);
+    const userSnap = await getDoc(userDocRef);
+    const currentData = userSnap.exists() ? (userSnap.data() as UserProfile) : null;
+    
+    const existingStoreIds: string[] = Array.isArray(currentData?.storeIds)
+      ? [...currentData!.storeIds]
+      : (currentData?.storeId ? [currentData.storeId] : []);
+    
+    if (!existingStoreIds.includes(storeId)) {
+      existingStoreIds.push(storeId);
+    }
+
+    const storeIndex = Math.min(existingStoreIds.length, 10);
+    const storeNumberKey = `storeId_${storeIndex}`;
+
+    const updatePayload: Record<string, any> = {
+      role: currentData?.role === 'admin' ? 'admin' : 'owner',
+      storeId, // Current connected store
+      activeStoreId: storeId,
+      storeIds: existingStoreIds,
+      [storeNumberKey]: storeId
+    };
+
+    await updateDoc(userDocRef, updatePayload);
+  } catch (userUpErr) {
+    console.warn('User storeIds update notice:', userUpErr);
+    await updateDoc(doc(db, 'users', ownerUid), {
+      role: 'owner',
+      storeId,
+      activeStoreId: storeId
+    }).catch(() => {});
+  }
 
   return newStore;
+}
+
+/**
+ * Switch connected/active store for a user profile
+ */
+export async function switchUserActiveStore(uid: string, storeId: string): Promise<void> {
+  try {
+    await updateDoc(doc(db, 'users', uid), {
+      storeId,
+      activeStoreId: storeId
+    });
+  } catch (err) {
+    console.warn('Error switching active store:', err);
+  }
 }
 
 export async function updateStoreStatus(storeId: string, status: 'active' | 'suspended'): Promise<void> {
@@ -360,6 +416,20 @@ export async function updateProduct(productId: string, updates: Partial<Product>
 }
 
 export async function deleteProduct(productId: string): Promise<void> {
+  try {
+    const prodDoc = await getDoc(doc(db, 'products', productId));
+    if (prodDoc.exists()) {
+      const prod = prodDoc.data() as Product;
+      const mediaUrls = [...(prod.images || []), prod.videoUrl].filter(Boolean) as string[];
+      if (mediaUrls.length > 0) {
+        deleteMultipleFromCloudinary(mediaUrls).catch(err =>
+          console.warn('[Cloudinary] Product media cleanup notice:', err)
+        );
+      }
+    }
+  } catch (err) {
+    console.warn('Notice reading product before deletion:', err);
+  }
   await deleteDoc(doc(db, 'products', productId));
 }
 
@@ -614,6 +684,17 @@ export async function addBanner(banner: Omit<Banner, 'bannerId'>): Promise<Banne
 }
 
 export async function deleteBanner(bannerId: string): Promise<void> {
+  try {
+    const snap = await getDoc(doc(db, 'banners', bannerId));
+    if (snap.exists()) {
+      const data = snap.data() as Banner;
+      if (data.imageUrl) {
+        deleteFromCloudinary(data.imageUrl).catch(() => {});
+      }
+    }
+  } catch (e) {
+    console.warn('Notice in deleteBanner media cleanup:', e);
+  }
   await deleteDoc(doc(db, 'banners', bannerId));
 }
 
@@ -700,3 +781,443 @@ export async function saveUserCartToFirestore(uid: string, cart: CartItem[]): Pr
     console.error('Failed to save cart to Firestore:', e);
   }
 }
+
+// ---------------- USER & CASCADE CLEANUP ENGINE ---------------- //
+
+const PROTECTED_STORE_IDS = new Set(INITIAL_STORES.map(s => s.storeId));
+const PROTECTED_PRODUCT_IDS = new Set(INITIAL_PRODUCTS.map(p => p.productId));
+const PROTECTED_USER_IDS = new Set(['demo_admin_uid', 'owner_tts_user', 'demo_customer_uid']);
+
+/**
+ * Fetch all registered users from Firestore
+ */
+export async function getAllUsers(): Promise<UserProfile[]> {
+  try {
+    const snap = await getDocs(collection(db, 'users'));
+    return snap.docs.map(d => ({ ...(d.data() as UserProfile), uid: d.id }));
+  } catch (err) {
+    console.warn('Failed to fetch users from Firestore:', err);
+    return [];
+  }
+}
+
+// ---------------- CHAT THREAD & MESSAGES CASCADE DELETION ---------------- //
+
+/**
+ * Completely delete a chat thread and all its nested messages in subcollection
+ */
+export async function deleteChatThreadWithMessages(chatId: string): Promise<number> {
+  let deletedMessagesCount = 0;
+  const mediaUrls: string[] = [];
+  try {
+    const messagesSnap = await getDocs(collection(db, 'chats', chatId, 'messages'));
+    if (!messagesSnap.empty) {
+      const batch = writeBatch(db);
+      messagesSnap.docs.forEach(docSnap => {
+        const msg = docSnap.data() as ChatMessage;
+        if (msg.imageUrl) {
+          mediaUrls.push(msg.imageUrl);
+        }
+        batch.delete(docSnap.ref);
+        deletedMessagesCount++;
+      });
+      await batch.commit();
+    }
+    // Delete the chat thread document itself
+    await deleteDoc(doc(db, 'chats', chatId));
+
+    if (mediaUrls.length > 0) {
+      deleteMultipleFromCloudinary(mediaUrls).catch(err =>
+        console.warn('[Cloudinary] Chat messages media cleanup notice:', err)
+      );
+    }
+  } catch (err) {
+    console.warn(`Error deleting chat thread ${chatId}:`, err);
+  }
+  return deletedMessagesCount;
+}
+
+/**
+ * Delete all chats associated with a storeId
+ */
+export async function deleteChatsByStore(storeId: string): Promise<{
+  deletedChatsCount: number;
+  deletedMessagesCount: number;
+}> {
+  let deletedChatsCount = 0;
+  let deletedMessagesCount = 0;
+  try {
+    const deletedChatIds = new Set<string>();
+
+    // 1. Query where storeId == storeId
+    const chatsQuery = query(collection(db, 'chats'), where('storeId', '==', storeId));
+    const chatsSnap = await getDocs(chatsQuery);
+    for (const chatDoc of chatsSnap.docs) {
+      const msgsCount = await deleteChatThreadWithMessages(chatDoc.id);
+      deletedMessagesCount += msgsCount;
+      deletedChatsCount++;
+      deletedChatIds.add(chatDoc.id);
+    }
+
+    // 2. Also check any chat where doc id ends with _storeId or data().storeId matches
+    const allChatsSnap = await getDocs(collection(db, 'chats'));
+    for (const chatDoc of allChatsSnap.docs) {
+      if (deletedChatIds.has(chatDoc.id)) continue;
+      const data = chatDoc.data() as ChatThread;
+      if (data.storeId === storeId || chatDoc.id.endsWith(`_${storeId}`)) {
+        const msgsCount = await deleteChatThreadWithMessages(chatDoc.id);
+        deletedMessagesCount += msgsCount;
+        deletedChatsCount++;
+        deletedChatIds.add(chatDoc.id);
+      }
+    }
+  } catch (err) {
+    console.warn(`Error deleting chats for store ${storeId}:`, err);
+  }
+  return { deletedChatsCount, deletedMessagesCount };
+}
+
+/**
+ * Delete all chats associated with a customer UID
+ */
+export async function deleteChatsByUser(uid: string): Promise<{
+  deletedChatsCount: number;
+  deletedMessagesCount: number;
+}> {
+  let deletedChatsCount = 0;
+  let deletedMessagesCount = 0;
+  try {
+    const deletedChatIds = new Set<string>();
+
+    // 1. Query where customerId == uid
+    const chatsQuery = query(collection(db, 'chats'), where('customerId', '==', uid));
+    const chatsSnap = await getDocs(chatsQuery);
+    for (const chatDoc of chatsSnap.docs) {
+      const msgsCount = await deleteChatThreadWithMessages(chatDoc.id);
+      deletedMessagesCount += msgsCount;
+      deletedChatsCount++;
+      deletedChatIds.add(chatDoc.id);
+    }
+
+    // 2. Also check any chat where doc id starts with uid_ or customerId == uid
+    const allChatsSnap = await getDocs(collection(db, 'chats'));
+    for (const chatDoc of allChatsSnap.docs) {
+      if (deletedChatIds.has(chatDoc.id)) continue;
+      const data = chatDoc.data() as ChatThread;
+      if (data.customerId === uid || chatDoc.id.startsWith(`${uid}_`)) {
+        const msgsCount = await deleteChatThreadWithMessages(chatDoc.id);
+        deletedMessagesCount += msgsCount;
+        deletedChatsCount++;
+        deletedChatIds.add(chatDoc.id);
+      }
+    }
+  } catch (err) {
+    console.warn(`Error deleting chats for user ${uid}:`, err);
+  }
+  return { deletedChatsCount, deletedMessagesCount };
+}
+
+/**
+ * Delete a store and all associated products and chats from Firestore (Cascade)
+ */
+export async function deleteStoreWithProducts(storeId: string): Promise<{ 
+  deletedProductsCount: number;
+  deletedChatsCount: number;
+}> {
+  let deletedProductsCount = 0;
+  let deletedChatsCount = 0;
+  const mediaUrlsToDelete: string[] = [];
+
+  try {
+    // 0. Fetch store document to extract logoUrl & bannerUrl
+    const storeDoc = await getDoc(doc(db, 'stores', storeId));
+    if (storeDoc.exists()) {
+      const sData = storeDoc.data() as Store;
+      if (sData.logoUrl) mediaUrlsToDelete.push(sData.logoUrl);
+      if (sData.bannerUrl) mediaUrlsToDelete.push(sData.bannerUrl);
+    }
+
+    // 1. Delete all products belonging to this store & collect media
+    const prodsQuery = query(collection(db, 'products'), where('storeId', '==', storeId));
+    const prodsSnap = await getDocs(prodsQuery);
+    
+    for (const prodDoc of prodsSnap.docs) {
+      const pData = prodDoc.data() as Product;
+      if (pData.images && Array.isArray(pData.images)) {
+        mediaUrlsToDelete.push(...pData.images);
+      }
+      if (pData.videoUrl) {
+        mediaUrlsToDelete.push(pData.videoUrl);
+      }
+      await deleteDoc(doc(db, 'products', prodDoc.id));
+      deletedProductsCount++;
+    }
+
+    // 2. Cascade delete all chats and nested messages belonging to this store
+    const chatRes = await deleteChatsByStore(storeId);
+    deletedChatsCount = chatRes.deletedChatsCount;
+
+    // 3. Delete the store document itself
+    await deleteDoc(doc(db, 'stores', storeId));
+    console.log(`Cascade deleted store ${storeId}, ${deletedProductsCount} products, and ${deletedChatsCount} chats.`);
+
+    // 4. Delete store logo, banner, and product images/videos from Cloudinary
+    if (mediaUrlsToDelete.length > 0) {
+      deleteMultipleFromCloudinary(mediaUrlsToDelete).catch(err =>
+        console.warn('[Cloudinary] Store cascade media cleanup notice:', err)
+      );
+    }
+  } catch (err) {
+    console.error(`Error deleting store ${storeId}, products, and chats:`, err);
+  }
+  return { deletedProductsCount, deletedChatsCount };
+}
+
+/**
+ * Delete a user and cascade delete their store, products, and all associated chats from Firestore
+ */
+export async function deleteUserCascade(uid: string, targetStoreId?: string): Promise<{
+  storeDeleted: boolean;
+  deletedProductsCount: number;
+  deletedChatsCount: number;
+}> {
+  let storeDeleted = false;
+  let deletedProductsCount = 0;
+  let deletedChatsCount = 0;
+  const userMediaToDelete: string[] = [];
+
+  try {
+    const storesToDelete = new Set<string>();
+    if (targetStoreId) {
+      storesToDelete.add(targetStoreId);
+    }
+
+    // 1. Check user document for linked storeId and avatarUrl
+    const userDoc = await getDoc(doc(db, 'users', uid));
+    if (userDoc.exists()) {
+      const uData = userDoc.data() as UserProfile;
+      if (uData.avatarUrl) userMediaToDelete.push(uData.avatarUrl);
+      if (uData.storeId) storesToDelete.add(uData.storeId);
+      if (Array.isArray(uData.storeIds)) {
+        uData.storeIds.forEach(id => { if (id) storesToDelete.add(id); });
+      }
+      for (let i = 1; i <= 10; i++) {
+        const key = `storeId_${i}` as keyof UserProfile;
+        if (uData[key]) storesToDelete.add(uData[key] as string);
+      }
+    }
+
+    // 2. Search all stores where ownerUid == uid
+    const storeQuery = query(collection(db, 'stores'), where('ownerUid', '==', uid));
+    const storeSnap = await getDocs(storeQuery);
+    for (const sDoc of storeSnap.docs) {
+      storesToDelete.add(sDoc.id);
+    }
+
+    // 3. Cascade delete every store owned by this user & its products & store chats & cloud media
+    for (const sId of storesToDelete) {
+      if (!PROTECTED_STORE_IDS.has(sId)) {
+        const res = await deleteStoreWithProducts(sId);
+        deletedProductsCount += res.deletedProductsCount;
+        deletedChatsCount += res.deletedChatsCount;
+        storeDeleted = true;
+      }
+    }
+
+    // 4. Delete any stray products authored by this ownerUid & collect media
+    const ownerProdsQuery = query(collection(db, 'products'), where('ownerUid', '==', uid));
+    const ownerProdsSnap = await getDocs(ownerProdsQuery);
+    for (const pDoc of ownerProdsSnap.docs) {
+      if (!PROTECTED_PRODUCT_IDS.has(pDoc.id)) {
+        const pData = pDoc.data() as Product;
+        if (pData.images && Array.isArray(pData.images)) {
+          userMediaToDelete.push(...pData.images);
+        }
+        if (pData.videoUrl) {
+          userMediaToDelete.push(pData.videoUrl);
+        }
+        await deleteDoc(doc(db, 'products', pDoc.id));
+        deletedProductsCount++;
+      }
+    }
+
+    // 5. Cascade delete all customer chats initiated by this user UID (including nested messages & images)
+    const userChatRes = await deleteChatsByUser(uid);
+    deletedChatsCount += userChatRes.deletedChatsCount;
+
+    // 6. Delete user document from Firestore
+    await deleteDoc(doc(db, 'users', uid));
+    console.log(`Cascade deleted user ${uid}, stores: ${Array.from(storesToDelete).join(', ') || 'none'}, ${deletedProductsCount} products, and ${deletedChatsCount} chats.`);
+
+    // 7. Delete user avatar & stray product media from Cloudinary
+    if (userMediaToDelete.length > 0) {
+      deleteMultipleFromCloudinary(userMediaToDelete).catch(err =>
+        console.warn('[Cloudinary] User cascade media cleanup notice:', err)
+      );
+    }
+  } catch (err) {
+    console.error(`Error performing cascade delete for user ${uid}:`, err);
+  }
+
+  return { storeDeleted, deletedProductsCount, deletedChatsCount };
+}
+
+/**
+ * Automatic Orphan Garbage Collector:
+ * Detects:
+ * 1. Stores whose owner user was deleted (e.g. directly from Firebase Console) -> purges store, products & store chats
+ * 2. Products whose store no longer exists -> purges products
+ * 3. Chats whose customer UID or Store ID was deleted -> purges chat thread & all nested messages
+ */
+let isCleaningOrphans = false;
+export async function cleanOrphanedStoresAndProducts(): Promise<{
+  orphanedStoresCleaned: number;
+  orphanedProductsCleaned: number;
+  orphanedChatsCleaned: number;
+}> {
+  if (isCleaningOrphans) {
+    return { orphanedStoresCleaned: 0, orphanedProductsCleaned: 0, orphanedChatsCleaned: 0 };
+  }
+  isCleaningOrphans = true;
+
+  let orphanedStoresCleaned = 0;
+  let orphanedProductsCleaned = 0;
+  let orphanedChatsCleaned = 0;
+
+  try {
+    // 1. Fetch current user documents
+    const usersSnap = await getDocs(collection(db, 'users'));
+    const existingUserUids = new Set(usersSnap.docs.map(d => d.id));
+
+    // 2. Fetch current stores
+    const storesSnap = await getDocs(collection(db, 'stores'));
+    const existingStores = storesSnap.docs.map(d => ({
+      id: d.id,
+      ...(d.data() as Store)
+    }));
+
+    const validStoreIds = new Set<string>();
+
+    // 3. Check for orphaned stores (ownerUid no longer exists in users collection)
+    for (const store of existingStores) {
+      const isProtected = PROTECTED_STORE_IDS.has(store.storeId);
+      const isOwnerProtected = PROTECTED_USER_IDS.has(store.ownerUid);
+      const ownerExists = existingUserUids.has(store.ownerUid) || isOwnerProtected;
+
+      if (!isProtected && !ownerExists && store.ownerUid) {
+        console.warn(`[Orphan Cleaner] Store "${store.storeName}" (${store.storeId}) owner ${store.ownerUid} was deleted! Purging store, products, chats & cloud media...`);
+        const storeMediaToDelete: string[] = [];
+        if (store.logoUrl) storeMediaToDelete.push(store.logoUrl);
+        if (store.bannerUrl) storeMediaToDelete.push(store.bannerUrl);
+
+        // Delete store document
+        await deleteDoc(doc(db, 'stores', store.storeId));
+        orphanedStoresCleaned++;
+
+        // Delete all products belonging to this orphaned store & collect media
+        const pQuery = query(collection(db, 'products'), where('storeId', '==', store.storeId));
+        const pSnap = await getDocs(pQuery);
+        for (const pDoc of pSnap.docs) {
+          const pData = pDoc.data() as Product;
+          if (pData.images && Array.isArray(pData.images)) {
+            storeMediaToDelete.push(...pData.images);
+          }
+          if (pData.videoUrl) {
+            storeMediaToDelete.push(pData.videoUrl);
+          }
+          await deleteDoc(doc(db, 'products', pDoc.id));
+          orphanedProductsCleaned++;
+        }
+
+        // Delete all chats belonging to this orphaned store
+        const chatRes = await deleteChatsByStore(store.storeId);
+        orphanedChatsCleaned += chatRes.deletedChatsCount;
+
+        // Delete all media from Cloudinary
+        if (storeMediaToDelete.length > 0) {
+          deleteMultipleFromCloudinary(storeMediaToDelete).catch(err =>
+            console.warn('[Cloudinary] Orphan store media cleanup notice:', err)
+          );
+        }
+      } else {
+        validStoreIds.add(store.storeId);
+      }
+    }
+
+    // 4. Fetch products and check for orphaned products (storeId or ownerUid no longer exists)
+    const prodsSnap = await getDocs(collection(db, 'products'));
+    for (const prodDoc of prodsSnap.docs) {
+      const prod = prodDoc.data() as Product;
+      const isProtectedProd = PROTECTED_PRODUCT_IDS.has(prod.productId);
+      const isStoreInvalid = prod.storeId && !validStoreIds.has(prod.storeId);
+      const isOwnerMissing = prod.ownerUid && !existingUserUids.has(prod.ownerUid) && !PROTECTED_USER_IDS.has(prod.ownerUid);
+
+      if (!isProtectedProd && (isStoreInvalid || isOwnerMissing)) {
+        console.warn(`[Orphan Cleaner] Product "${prod.title}" (${prod.productId}) store ${prod.storeId} no longer exists! Purging...`);
+        const orphanProdMedia = [...(prod.images || []), prod.videoUrl].filter(Boolean) as string[];
+        await deleteDoc(doc(db, 'products', prod.productId));
+        orphanedProductsCleaned++;
+
+        if (orphanProdMedia.length > 0) {
+          deleteMultipleFromCloudinary(orphanProdMedia).catch(err =>
+            console.warn('[Cloudinary] Orphan product media cleanup notice:', err)
+          );
+        }
+      }
+    }
+
+    // 5. Check for orphaned chats (where customerId no longer exists in users OR storeId no longer exists in validStoreIds)
+    const chatsSnap = await getDocs(collection(db, 'chats'));
+    for (const chatDoc of chatsSnap.docs) {
+      const chat = chatDoc.data() as ChatThread;
+      const isCustomerOrphaned = chat.customerId && 
+        !existingUserUids.has(chat.customerId) && 
+        !PROTECTED_USER_IDS.has(chat.customerId);
+      const isStoreOrphaned = chat.storeId && 
+        !validStoreIds.has(chat.storeId) && 
+        !PROTECTED_STORE_IDS.has(chat.storeId);
+
+      if (isCustomerOrphaned || isStoreOrphaned) {
+        console.warn(`[Orphan Cleaner] Chat "${chatDoc.id}" (Customer: ${chat.customerId}, Store: ${chat.storeId}) is orphaned because user or store was deleted! Purging chat & messages...`);
+        await deleteChatThreadWithMessages(chatDoc.id);
+        orphanedChatsCleaned++;
+      }
+    }
+
+    if (orphanedStoresCleaned > 0 || orphanedProductsCleaned > 0 || orphanedChatsCleaned > 0) {
+      console.log(`[Orphan Cleaner] Cleanup completed: Purged ${orphanedStoresCleaned} orphaned stores, ${orphanedProductsCleaned} orphaned products, and ${orphanedChatsCleaned} orphaned chats.`);
+    }
+  } catch (err) {
+    console.warn('[Orphan Cleaner] Notice during check:', err);
+  } finally {
+    isCleaningOrphans = false;
+  }
+
+  return { orphanedStoresCleaned, orphanedProductsCleaned, orphanedChatsCleaned };
+}
+
+export const cleanOrphanedStoresProductsAndChats = cleanOrphanedStoresAndProducts;
+
+/**
+ * Real-time watcher that triggers automatic cascade cleanup whenever a user document is deleted
+ */
+export function subscribeUsersWatchCleanup(): () => void {
+  try {
+    let previousUserCount: number | null = null;
+    return onSnapshot(collection(db, 'users'), (snapshot) => {
+      const currentCount = snapshot.size;
+      if (previousUserCount !== null && currentCount < previousUserCount) {
+        console.log('[Users Watcher] User deletion detected in Firestore! Running automatic cascade cleanup...');
+        cleanOrphanedStoresAndProducts().catch(console.error);
+      }
+      previousUserCount = currentCount;
+    }, (error) => {
+      console.warn('Users watcher notice:', error);
+    });
+  } catch {
+    return () => {};
+  }
+}
+
+
+

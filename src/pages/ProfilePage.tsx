@@ -1,6 +1,7 @@
-import React from 'react';
-import { User, Store, ShieldCheck, ShoppingBag, LogOut, CheckCircle2, MessageSquare } from 'lucide-react';
+import React, { useState } from 'react';
+import { User, Store, ShieldCheck, ShoppingBag, LogOut, CheckCircle2, MessageSquare, Camera, Loader2, Check } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { uploadToCloudinary } from '../lib/cloudinary';
 import type { UserRole } from '../types';
 
 interface ProfilePageProps {
@@ -18,7 +19,23 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({
   onNavigateAdmin,
   onOpenAuth
 }) => {
-  const { currentUser, userProfile, logout, switchDemoRole } = useAuth();
+  const { currentUser, userProfile, persona, logout, switchDemoRole, updateProfileData } = useAuth();
+  const [avatarUploading, setAvatarUploading] = useState(false);
+
+  const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setAvatarUploading(true);
+    try {
+      const url = await uploadToCloudinary(file, 'image', 'avatar_500');
+      await updateProfileData({ avatarUrl: url });
+    } catch (err) {
+      console.error('Failed to update avatar:', err);
+    } finally {
+      setAvatarUploading(false);
+    }
+  };
 
   if (!currentUser && !userProfile) {
     return (
@@ -38,24 +55,49 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({
 
   return (
     <div className="max-w-3xl mx-auto pb-16 space-y-6">
-      {/* Profile Header */}
+      {/* Profile Header (Reflects Connected Store or Customer Account) */}
       <div className="bg-white rounded-3xl border border-slate-200 p-6 shadow-xs flex flex-wrap items-center justify-between gap-4">
         <div className="flex items-center gap-4">
-          <div className="w-16 h-16 rounded-2xl bg-emerald-100 text-emerald-800 font-black text-2xl flex items-center justify-center">
-            {userProfile?.name?.charAt(0).toUpperCase() || 'U'}
+          <div className="relative group">
+            <div className="w-16 h-16 rounded-2xl bg-emerald-100 text-emerald-800 font-black text-2xl flex items-center justify-center overflow-hidden border border-slate-200 shadow-xs">
+              {avatarUploading ? (
+                <Loader2 className="w-6 h-6 animate-spin text-emerald-700" />
+              ) : persona?.avatarUrl ? (
+                <img src={persona.avatarUrl} alt={persona.name} className="w-full h-full object-cover" />
+              ) : (
+                persona?.name?.charAt(0).toUpperCase() || 'U'
+              )}
+            </div>
+            {persona?.type === 'customer' && (
+              <label className="absolute -bottom-1 -right-1 p-1 bg-white hover:bg-slate-50 rounded-full border border-slate-300 shadow-xs cursor-pointer text-slate-600 transition-colors" title="Change Customer Profile Picture (500x500)">
+                <Camera className="w-3.5 h-3.5" />
+                <input type="file" accept="image/*" onChange={handleAvatarUpload} className="hidden" />
+              </label>
+            )}
           </div>
           <div>
-            <div className="flex items-center gap-2">
-              <h1 className="text-lg font-black text-slate-900">{userProfile?.name || 'Sodaipur User'}</h1>
-              <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${
-                userProfile?.role === 'admin' ? 'bg-rose-100 text-rose-800' :
-                userProfile?.role === 'owner' ? 'bg-blue-100 text-blue-800' :
-                'bg-emerald-100 text-emerald-800'
+            <div className="flex items-center gap-2 flex-wrap">
+              <h1 className="text-lg font-black text-slate-900">{persona?.name || 'Sodaipur User'}</h1>
+              <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase flex items-center gap-1 ${
+                persona?.type === 'store' 
+                  ? 'bg-blue-100 text-blue-800' 
+                  : 'bg-emerald-100 text-emerald-800'
               }`}>
-                {userProfile?.role}
+                <Check className="w-2.5 h-2.5" />
+                {persona?.roleLabel}
               </span>
+              {userProfile?.role === 'admin' && (
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase bg-rose-100 text-rose-800">
+                  Admin
+                </span>
+              )}
             </div>
-            <p className="text-xs text-slate-500 mt-0.5">{userProfile?.email}</p>
+            <p className="text-xs text-slate-500 mt-0.5">{persona?.email}</p>
+            {userProfile?.storeIds && userProfile.storeIds.length > 0 && (
+              <p className="text-[11px] text-blue-700 font-semibold mt-0.5">
+                Total Accounts: 1 Customer + {userProfile.storeIds.length} Stores ({userProfile.storeIds.length + 1} of 11)
+              </p>
+            )}
           </div>
         </div>
 

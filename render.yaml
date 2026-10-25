@@ -45,3 +45,7 @@ services:
         sync: false
       - key: NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET
         sync: false
+      - key: CLOUDINARY_API_KEY
+        sync: false
+      - key: CLOUDINARY_API_SECRET
+        sync: false

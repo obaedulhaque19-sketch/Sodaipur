@@ -14,7 +14,7 @@ export const BottomNavigation: React.FC<BottomNavProps> = ({
   onNavigate,
   onOpenAuth
 }) => {
-  const { currentUser, userProfile, logout } = useAuth();
+  const { currentUser, userProfile, persona, logout } = useAuth();
   const { t } = useLanguage();
   const [showUserMenu, setShowUserMenu] = useState(false);
 
@@ -89,14 +89,18 @@ export const BottomNavigation: React.FC<BottomNavProps> = ({
               }`}
             >
               {userProfile ? (
-                <div className="w-6 h-6 sm:w-7 sm:h-7 rounded-full bg-emerald-100 text-emerald-800 font-black text-xs sm:text-sm flex items-center justify-center mb-0.5 sm:mb-1 border border-emerald-300 shadow-xs">
-                  {userProfile.name?.charAt(0).toUpperCase() || 'U'}
+                <div className="w-6 h-6 sm:w-7 sm:h-7 rounded-full bg-emerald-100 text-emerald-800 font-black text-xs sm:text-sm flex items-center justify-center mb-0.5 sm:mb-1 border border-emerald-300 shadow-xs overflow-hidden">
+                  {persona?.avatarUrl ? (
+                    <img src={persona.avatarUrl} alt={persona.name} className="w-full h-full object-cover" />
+                  ) : (
+                    persona?.name?.charAt(0).toUpperCase() || 'U'
+                  )}
                 </div>
               ) : (
                 <User className="w-5 h-5 sm:w-6 sm:h-6 mb-0.5 sm:mb-1 stroke-[2.2]" />
               )}
               <span className="text-[10px] sm:text-xs truncate max-w-[80px]">
-                {userProfile ? (userProfile.name?.split(' ')[0] || 'Account') : t('nav.profile')}
+                {persona ? (persona.name?.split(' ')[0] || 'Account') : t('nav.profile')}
               </span>
             </button>
           </div>
@@ -117,22 +121,24 @@ export const BottomNavigation: React.FC<BottomNavProps> = ({
             {/* User Profile Header */}
             <div className="px-4 py-2 border-b border-slate-100">
               <div className="flex items-center gap-2.5">
-                <div className="w-9 h-9 rounded-full bg-emerald-100 text-emerald-800 font-black text-sm flex items-center justify-center shrink-0">
-                  {userProfile.name?.charAt(0).toUpperCase() || 'U'}
+                <div className="w-9 h-9 rounded-full bg-emerald-100 text-emerald-800 font-black text-sm flex items-center justify-center shrink-0 overflow-hidden border border-emerald-300">
+                  {persona?.avatarUrl ? (
+                    <img src={persona.avatarUrl} alt={persona.name} className="w-full h-full object-cover" />
+                  ) : (
+                    persona?.name?.charAt(0).toUpperCase() || 'U'
+                  )}
                 </div>
-                <div className="min-w-0">
-                  <p className="text-xs font-bold text-slate-800 truncate">{userProfile.name}</p>
-                  <p className="text-[11px] text-slate-400 truncate">{userProfile.email}</p>
+                <div className="min-w-0 flex-1">
+                  <p className="text-xs font-bold text-slate-800 truncate">{persona?.name}</p>
+                  <p className="text-[11px] text-slate-400 truncate">{persona?.email}</p>
                 </div>
               </div>
               <span className={`inline-block mt-2 text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-full ${
-                userProfile.role === 'admin' 
-                  ? 'bg-rose-100 text-rose-700' 
-                  : userProfile.role === 'owner' 
+                persona?.type === 'store' 
                   ? 'bg-blue-100 text-blue-700' 
                   : 'bg-emerald-100 text-emerald-800'
               }`}>
-                {userProfile.role}
+                {persona?.roleLabel}
               </span>
             </div>
 
