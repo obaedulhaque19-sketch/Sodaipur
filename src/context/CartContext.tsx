@@ -26,34 +26,53 @@ interface CartContextType {
 const CartContext = createContext<CartContextType | undefined>(undefined);
 
 export const CartProvider: React.FC<{ children: React.ReactNode; onRequireAuth?: () => void }> = ({ children, onRequireAuth }) => {
-  const { currentUser } = useAuth();
-  const [cartItems, setCartItems] = useState<CartItem[]>([]);
+  const { currentUser, loading } = useAuth();
+  const [cartItems, setCartItems] = useState<CartItem[]>(() => {
+    try {
+      const saved = localStorage.getItem('sodaipur_cart_cache');
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
   const [isCartOpen, setIsCartOpen] = useState(false);
   const [shippingZone, setShippingZone] = useState<'inside_dhaka' | 'outside_dhaka'>('inside_dhaka');
   const [couponCode, setCouponCode] = useState('');
   const [discount, setDiscount] = useState(0);
 
-  // Sync cart with Firestore when user logs in or logs out
+  // Sync cart with Firestore when user logs in or auth resolves
   useEffect(() => {
+    if (loading) return; // Wait until auth state resolves
+
     if (currentUser?.uid) {
-      // Fetch user's saved cart from Firestore
+      const userCacheKey = `sodaipur_cart_${currentUser.uid}`;
+      // 1. Immediately read user-specific localStorage cache if available for instant UI rendering
+      try {
+        const localCached = localStorage.getItem(userCacheKey);
+        if (localCached) {
+          const parsed = JSON.parse(localCached);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            setCartItems(parsed);
+          }
+        }
+      } catch {}
+
+      // 2. Fetch authoritative user's saved cart from Firestore
       getUserCartFromFirestore(currentUser.uid).then(remoteCart => {
-        setCartItems(remoteCart);
+        if (Array.isArray(remoteCart)) {
+          setCartItems(remoteCart);
+          try {
+            localStorage.setItem(userCacheKey, JSON.stringify(remoteCart));
+          } catch {}
+        }
       });
     } else {
-      // Clear cart on logout or for guest
+      // User is logged out
       setCartItems([]);
       setCouponCode('');
       setDiscount(0);
     }
-  }, [currentUser?.uid]);
-
-  // Persist cart to Firestore whenever cartItems updates for logged in user
-  useEffect(() => {
-    if (currentUser?.uid) {
-      saveUserCartToFirestore(currentUser.uid, cartItems);
-    }
-  }, [cartItems, currentUser?.uid]);
+  }, [currentUser?.uid, loading]);
 
   const addToCart = (product: Product, quantity: number = 1, selectedColor?: string, selectedSize?: string) => {
     // Require authentication before adding to cart
@@ -66,19 +85,44 @@ export const CartProvider: React.FC<{ children: React.ReactNode; onRequireAuth?:
 
     setCartItems(prev => {
       const existingIndex = prev.findIndex(item => item.product.productId === product.productId);
+      let updated: CartItem[];
       if (existingIndex > -1) {
-        const next = [...prev];
-        next[existingIndex].quantity += quantity;
-        return next;
+        updated = [...prev];
+        updated[existingIndex] = {
+          ...updated[existingIndex],
+          quantity: updated[existingIndex].quantity + quantity
+        };
+      } else {
+        const newItem: CartItem = { product, quantity };
+        if (selectedColor) newItem.selectedColor = selectedColor;
+        if (selectedSize) newItem.selectedSize = selectedSize;
+        updated = [...prev, newItem];
       }
-      return [...prev, { product, quantity, selectedColor, selectedSize }];
+
+      // Explicitly persist only on user action - never passively wiped
+      if (currentUser?.uid) {
+        saveUserCartToFirestore(currentUser.uid, updated);
+        try {
+          localStorage.setItem(`sodaipur_cart_${currentUser.uid}`, JSON.stringify(updated));
+        } catch {}
+      }
+      return updated;
     });
 
     setIsCartOpen(true);
   };
 
   const removeFromCart = (productId: string) => {
-    setCartItems(prev => prev.filter(item => item.product.productId !== productId));
+    setCartItems(prev => {
+      const updated = prev.filter(item => item.product.productId !== productId);
+      if (currentUser?.uid) {
+        saveUserCartToFirestore(currentUser.uid, updated);
+        try {
+          localStorage.setItem(`sodaipur_cart_${currentUser.uid}`, JSON.stringify(updated));
+        } catch {}
+      }
+      return updated;
+    });
   };
 
   const updateQuantity = (productId: string, quantity: number) => {
@@ -86,15 +130,30 @@ export const CartProvider: React.FC<{ children: React.ReactNode; onRequireAuth?:
       removeFromCart(productId);
       return;
     }
-    setCartItems(prev => prev.map(item => 
-      item.product.productId === productId ? { ...item, quantity } : item
-    ));
+    setCartItems(prev => {
+      const updated = prev.map(item => 
+        item.product.productId === productId ? { ...item, quantity } : item
+      );
+      if (currentUser?.uid) {
+        saveUserCartToFirestore(currentUser.uid, updated);
+        try {
+          localStorage.setItem(`sodaipur_cart_${currentUser.uid}`, JSON.stringify(updated));
+        } catch {}
+      }
+      return updated;
+    });
   };
 
   const clearCart = () => {
     setCartItems([]);
     setCouponCode('');
     setDiscount(0);
+    if (currentUser?.uid) {
+      saveUserCartToFirestore(currentUser.uid, []);
+      try {
+        localStorage.removeItem(`sodaipur_cart_${currentUser.uid}`);
+      } catch {}
+    }
   };
 
   const subtotal = cartItems.reduce((acc, item) => acc + (item.product.price * item.quantity), 0);

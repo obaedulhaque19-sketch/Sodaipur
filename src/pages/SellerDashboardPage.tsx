@@ -39,6 +39,7 @@ interface SellerDashboardProps {
   products: Product[];
   initialTab?: 'overview' | 'inventory' | 'new_product' | 'orders' | 'chat' | 'settings';
   onNavigateProduct: (slug: string) => void;
+  onNavigate?: (path: string) => void;
 }
 
 export const SellerDashboardPage: React.FC<SellerDashboardProps> = ({
@@ -46,10 +47,17 @@ export const SellerDashboardPage: React.FC<SellerDashboardProps> = ({
   stores,
   products,
   initialTab = 'overview',
-  onNavigateProduct
+  onNavigateProduct,
+  onNavigate
 }) => {
   const { currentUser, userProfile, updateProfileData } = useAuth();
   const [activeTab, setActiveTab] = useState<'overview' | 'inventory' | 'new_product' | 'orders' | 'chat' | 'settings'>(initialTab);
+
+  useEffect(() => {
+    if (initialTab === 'chat' && onNavigate) {
+      onNavigate('/chat');
+    }
+  }, [initialTab, onNavigate]);
 
   // Store profile of current logged-in owner
   const myStore = stores.find(s => s.storeId === userProfile?.storeId || s.ownerUid === userProfile?.uid);
@@ -414,8 +422,14 @@ export const SellerDashboardPage: React.FC<SellerDashboardProps> = ({
             Orders ({storeOrders.length})
           </button>
           <button
-            onClick={() => setActiveTab('chat')}
-            className={`px-3 py-1.5 rounded-xl transition-all flex items-center gap-1 ${
+            onClick={() => {
+              if (onNavigate) {
+                onNavigate('/chat');
+              } else {
+                setActiveTab('chat');
+              }
+            }}
+            className={`px-3 py-1.5 rounded-xl transition-all flex items-center gap-1 cursor-pointer ${
               activeTab === 'chat' ? 'bg-white text-emerald-800 shadow-xs' : 'text-slate-600 hover:text-slate-900'
             }`}
           >

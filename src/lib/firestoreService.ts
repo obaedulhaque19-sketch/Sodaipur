@@ -365,26 +365,84 @@ export async function deleteProduct(productId: string): Promise<void> {
 
 // ---------------- CHATS & MESSAGES ---------------- //
 
-export function subscribeUserChats(userId: string, isStoreOwner: boolean, storeId?: string, callback?: (threads: ChatThread[]) => void) {
-  try {
-    // If owner, query where storeId == currentStoreId; if customer, where customerId == userId
-    const q = isStoreOwner && storeId
-      ? query(collection(db, 'chats'), where('storeId', '==', storeId))
-      : query(collection(db, 'chats'), where('customerId', '==', userId));
+export interface UserChatsPayload {
+  customerChats: ChatThread[]; // Threads where user is the buyer/customer
+  sellerChats: ChatThread[];   // Threads where user's store is the seller
+  allChats: ChatThread[];      // All threads combined and sorted
+}
 
-    return onSnapshot(q, (snap) => {
-      const threads = snap.docs.map(d => d.data() as ChatThread);
-      // Sort by updatedAt desc
-      threads.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
-      if (callback) callback(threads);
-    }, (err) => {
-      console.warn('Chat threads listener notice:', err);
-      if (callback) callback([]);
+export function subscribeAllUserChats(
+  userId: string,
+  storeId?: string,
+  callback?: (payload: UserChatsPayload) => void
+) {
+  let customerThreads: ChatThread[] = [];
+  let sellerThreads: ChatThread[] = [];
+
+  const emit = () => {
+    if (!callback) return;
+    const combined = [...customerThreads, ...sellerThreads];
+    const uniqueMap = new Map<string, ChatThread>();
+    combined.forEach(t => uniqueMap.set(t.chatId, t));
+    const allChats = Array.from(uniqueMap.values()).sort(
+      (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
+    );
+    callback({
+      customerChats: customerThreads,
+      sellerChats: sellerThreads,
+      allChats
     });
-  } catch {
-    if (callback) callback([]);
-    return () => {};
+  };
+
+  // 1. Customer chats (where user is buyer)
+  let unsubCustomer = () => {};
+  if (userId) {
+    try {
+      const qCust = query(collection(db, 'chats'), where('customerId', '==', userId));
+      unsubCustomer = onSnapshot(qCust, (snap) => {
+        customerThreads = snap.docs.map(d => d.data() as ChatThread);
+        customerThreads.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+        emit();
+      }, (err) => {
+        console.warn('Customer chats listener notice:', err);
+      });
+    } catch (e) {
+      console.warn('Customer chats query error:', e);
+    }
   }
+
+  // 2. Seller chats (where user's store receives customer inquiries)
+  let unsubSeller = () => {};
+  if (storeId) {
+    try {
+      const qSell = query(collection(db, 'chats'), where('storeId', '==', storeId));
+      unsubSeller = onSnapshot(qSell, (snap) => {
+        sellerThreads = snap.docs.map(d => d.data() as ChatThread);
+        sellerThreads.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+        emit();
+      }, (err) => {
+        console.warn('Seller chats listener notice:', err);
+      });
+    } catch (e) {
+      console.warn('Seller chats query error:', e);
+    }
+  }
+
+  return () => {
+    unsubCustomer();
+    unsubSeller();
+  };
+}
+
+export function subscribeUserChats(userId: string, isStoreOwner: boolean, storeId?: string, callback?: (threads: ChatThread[]) => void) {
+  return subscribeAllUserChats(userId, storeId, (payload) => {
+    if (!callback) return;
+    if (isStoreOwner && storeId) {
+      callback(payload.sellerChats);
+    } else {
+      callback(payload.customerChats);
+    }
+  });
 }
 
 export function subscribeMessages(chatId: string, callback: (msgs: ChatMessage[]) => void) {
@@ -413,6 +471,12 @@ export async function getOrCreateChatThread(
   storeId: string, 
   storeName: string
 ): Promise<string> {
+  // Prevent self-chat: customer cannot chat with their own store
+  if (customerId === storeId) {
+    console.warn('Self-chat prevented.');
+    return '';
+  }
+
   const chatId = `${customerId}_${storeId}`;
   const chatRef = doc(db, 'chats', chatId);
   
@@ -422,13 +486,19 @@ export async function getOrCreateChatThread(
       const newThread: ChatThread = {
         chatId,
         customerId,
-        customerName,
+        customerName: customerName || 'Customer',
         storeId,
-        storeName,
+        storeName: storeName || 'Official Store',
         lastMessage: 'Chat started',
         updatedAt: new Date().toISOString()
       };
       await setDoc(chatRef, newThread);
+    } else {
+      // Refresh names if they were generic
+      const current = snap.data() as ChatThread;
+      if (storeName && current.storeName !== storeName) {
+        await updateDoc(chatRef, { storeName });
+      }
     }
   } catch (e) {
     console.warn('Chat thread check notice:', e);
@@ -547,14 +617,58 @@ export async function deleteBanner(bannerId: string): Promise<void> {
   await deleteDoc(doc(db, 'banners', bannerId));
 }
 
-// ---------------- USER CART PERSISTENCE ---------------- //
+// ---------------- USER CART PERSISTENCE (Lightweight & Enterprise Grade) ---------------- //
+
+export interface CompactStoredCartItem {
+  productId: string;
+  title: string;
+  price: number;
+  originalPrice?: number | null;
+  image: string;
+  storeId: string;
+  storeName?: string;
+  productSlug: string;
+  quantity: number;
+  selectedColor?: string | null;
+  selectedSize?: string | null;
+}
 
 export async function getUserCartFromFirestore(uid: string): Promise<CartItem[]> {
   try {
     const userDoc = await getDoc(doc(db, 'users', uid));
     if (userDoc.exists()) {
       const data = userDoc.data();
-      return (data.cart || []) as CartItem[];
+      const rawCart = (data.cart || []) as any[];
+      return rawCart.map(item => {
+        // If legacy format with nested product
+        if (item.product && item.product.productId) {
+          return item as CartItem;
+        }
+        // If clean compact format
+        const cartItem: CartItem = {
+          quantity: Number(item.quantity) || 1,
+          selectedColor: item.selectedColor || undefined,
+          selectedSize: item.selectedSize || undefined,
+          product: {
+            productId: item.productId,
+            title: item.title || 'Product',
+            price: Number(item.price) || 0,
+            originalPrice: item.originalPrice ? Number(item.originalPrice) : undefined,
+            productSlug: item.productSlug || item.productId,
+            storeId: item.storeId || '',
+            storeName: item.storeName || '',
+            images: item.image ? [item.image] : [],
+            description: '',
+            stock: 99,
+            categoryPath: [],
+            mainCategory: '',
+            isFeatured: false,
+            status: 'approved',
+            ownerUid: ''
+          }
+        };
+        return cartItem;
+      });
     }
   } catch (err) {
     console.warn('Failed to load cart from Firestore:', err);
@@ -564,14 +678,25 @@ export async function getUserCartFromFirestore(uid: string): Promise<CartItem[]>
 
 export async function saveUserCartToFirestore(uid: string, cart: CartItem[]): Promise<void> {
   try {
-    await updateDoc(doc(db, 'users', uid), {
-      cart: cart
-    });
-  } catch (err) {
-    try {
-      await setDoc(doc(db, 'users', uid), { cart: cart }, { merge: true });
-    } catch (e) {
-      console.warn('Failed to save cart to Firestore:', e);
-    }
+    // Convert to lightweight, clean format storing only essential fields (Daraz/Amazon standard)
+    const compactCart: CompactStoredCartItem[] = cart.map(item => ({
+      productId: item.product.productId,
+      title: item.product.title,
+      price: item.product.price,
+      originalPrice: item.product.originalPrice || null,
+      image: item.product.images?.[0] || '',
+      storeId: item.product.storeId || '',
+      storeName: item.product.storeName || '',
+      productSlug: item.product.productSlug || item.product.productId,
+      quantity: item.quantity,
+      selectedColor: item.selectedColor || null,
+      selectedSize: item.selectedSize || null
+    }));
+
+    const cleanCart = JSON.parse(JSON.stringify(compactCart));
+    const userRef = doc(db, 'users', uid);
+    await setDoc(userRef, { cart: cleanCart }, { merge: true });
+  } catch (e) {
+    console.error('Failed to save cart to Firestore:', e);
   }
 }

@@ -255,7 +255,13 @@ export const Header: React.FC<HeaderProps> = ({
           <div className="hidden xl:flex items-center gap-2 shrink-0">
             {/* Direct Chat icon (Hidden on mobile phones where bottom navigation already has Chat) */}
             <button
-              onClick={() => onNavigate('/chat')}
+              onClick={() => {
+                if (!currentUser) {
+                  onOpenAuth();
+                } else {
+                  onNavigate('/chat');
+                }
+              }}
               title="Real-time Chat"
               className="hidden xl:flex p-2 rounded-full hover:bg-slate-100 text-slate-700 relative transition-colors cursor-pointer items-center justify-center"
             >

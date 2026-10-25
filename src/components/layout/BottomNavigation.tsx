@@ -60,7 +60,11 @@ export const BottomNavigation: React.FC<BottomNavProps> = ({
           <button
             onClick={() => {
               setShowUserMenu(false);
-              onNavigate('/chat');
+              if (!currentUser) {
+                onOpenAuth();
+              } else {
+                onNavigate('/chat');
+              }
             }}
             className={`flex flex-col items-center justify-center py-1 sm:py-1.5 transition-all active:scale-95 cursor-pointer relative ${
               isChat ? 'text-emerald-700 font-bold' : 'text-slate-500 hover:text-slate-700 font-medium'

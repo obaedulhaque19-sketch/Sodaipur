@@ -1,10 +1,11 @@
 import React from 'react';
-import { User, Store, ShieldCheck, ShoppingBag, LogOut, CheckCircle2 } from 'lucide-react';
+import { User, Store, ShieldCheck, ShoppingBag, LogOut, CheckCircle2, MessageSquare } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import type { UserRole } from '../types';
 
 interface ProfilePageProps {
   onNavigateOrders: () => void;
+  onNavigateChat: () => void;
   onNavigateSeller: () => void;
   onNavigateAdmin: () => void;
   onOpenAuth: () => void;
@@ -12,6 +13,7 @@ interface ProfilePageProps {
 
 export const ProfilePage: React.FC<ProfilePageProps> = ({
   onNavigateOrders,
+  onNavigateChat,
   onNavigateSeller,
   onNavigateAdmin,
   onOpenAuth
@@ -67,32 +69,41 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({
       </div>
 
       {/* Role Navigation Quick Links */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
         <button
           onClick={onNavigateOrders}
-          className="p-4 bg-white rounded-2xl border border-slate-200 hover:border-emerald-300 shadow-xs text-left group"
+          className="p-4 bg-white rounded-2xl border border-slate-200 hover:border-emerald-300 shadow-xs text-left group cursor-pointer"
         >
           <ShoppingBag className="w-5 h-5 text-emerald-700 mb-2 group-hover:scale-110 transition-transform" />
-          <h3 className="font-bold text-xs text-slate-800">My Orders & Tracking</h3>
-          <p className="text-[11px] text-slate-400 mt-0.5">Check order status, invoices & history</p>
+          <h3 className="font-bold text-xs text-slate-800">My Orders</h3>
+          <p className="text-[11px] text-slate-400 mt-0.5">Check order status & tracking</p>
+        </button>
+
+        <button
+          onClick={onNavigateChat}
+          className="p-4 bg-white rounded-2xl border border-slate-200 hover:border-emerald-300 shadow-xs text-left group cursor-pointer"
+        >
+          <MessageSquare className="w-5 h-5 text-emerald-700 mb-2 group-hover:scale-110 transition-transform" />
+          <h3 className="font-bold text-xs text-slate-800">Direct Messages</h3>
+          <p className="text-[11px] text-slate-400 mt-0.5">Live chat with sellers & buyers</p>
         </button>
 
         <button
           onClick={onNavigateSeller}
-          className="p-4 bg-white rounded-2xl border border-slate-200 hover:border-emerald-300 shadow-xs text-left group"
+          className="p-4 bg-white rounded-2xl border border-slate-200 hover:border-emerald-300 shadow-xs text-left group cursor-pointer"
         >
           <Store className="w-5 h-5 text-blue-600 mb-2 group-hover:scale-110 transition-transform" />
           <h3 className="font-bold text-xs text-slate-800">Seller Center</h3>
-          <p className="text-[11px] text-slate-400 mt-0.5">Manage products, inventory & orders</p>
+          <p className="text-[11px] text-slate-400 mt-0.5">Manage products & inventory</p>
         </button>
 
         <button
           onClick={onNavigateAdmin}
-          className="p-4 bg-white rounded-2xl border border-slate-200 hover:border-emerald-300 shadow-xs text-left group"
+          className="p-4 bg-white rounded-2xl border border-slate-200 hover:border-emerald-300 shadow-xs text-left group cursor-pointer"
         >
           <ShieldCheck className="w-5 h-5 text-rose-600 mb-2 group-hover:scale-110 transition-transform" />
-          <h3 className="font-bold text-xs text-slate-800">Super Admin Panel</h3>
-          <p className="text-[11px] text-slate-400 mt-0.5">Platform governance, moderation & taxonomy</p>
+          <h3 className="font-bold text-xs text-slate-800">Super Admin</h3>
+          <p className="text-[11px] text-slate-400 mt-0.5">Platform governance & moderation</p>
         </button>
       </div>
 

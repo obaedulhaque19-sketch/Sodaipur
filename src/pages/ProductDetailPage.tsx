@@ -19,6 +19,7 @@ import {
 import type { Product, Store } from '../types';
 import { PriceTag } from '../components/common/PriceTag';
 import { useCart } from '../context/CartContext';
+import { useAuth } from '../context/AuthContext';
 import { useLanguage } from '../context/LanguageContext';
 import { VerifiedBadge, VerifiedStoreName } from '../components/common/VerifiedBadge';
 import { WhatsAppIcon } from '../components/common/WhatsAppIcon';
@@ -43,6 +44,7 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
   onNavigateCheckout
 }) => {
   const { addToCart } = useCart();
+  const { currentUser } = useAuth();
   const { lang, t } = useLanguage();
 
   const [activeImageIndex, setActiveImageIndex] = useState(0);
@@ -57,12 +59,20 @@ export const ProductDetailPage: React.FC<ProductDetailPageProps> = ({
   const displayTitle = lang === 'bn' && product.titleBn ? product.titleBn : product.title;
 
   const handleAddToCart = () => {
+    if (!currentUser) {
+      addToCart(product, quantity);
+      return;
+    }
     addToCart(product, quantity);
     setAddedNotice(true);
     setTimeout(() => setAddedNotice(false), 2000);
   };
 
   const handleBuyNow = () => {
+    if (!currentUser) {
+      addToCart(product, quantity);
+      return;
+    }
     addToCart(product, quantity);
     onNavigateCheckout();
   };

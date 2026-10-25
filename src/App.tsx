@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { AlertCircle, X } from 'lucide-react';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { CartProvider, useCart } from './context/CartContext';
 import { LanguageProvider } from './context/LanguageContext';
@@ -32,10 +33,19 @@ import {
 } from './lib/firestoreService';
 
 function AppContent() {
+  const { currentUser, userProfile } = useAuth();
   // Navigation State
   const [currentPath, setCurrentPath] = useState<string>(window.location.pathname || '/');
   const [searchParams, setSearchParams] = useState<URLSearchParams>(new URLSearchParams(window.location.search));
   const [isAuthOpen, setIsAuthOpen] = useState(false);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  const showToast = (msg: string) => {
+    setToastMessage(msg);
+    setTimeout(() => {
+      setToastMessage(prev => prev === msg ? null : prev);
+    }, 4500);
+  };
 
   // Tablet Scroll Container Ref to handle responsive view iframe scroll bugs
   const tabletScrollRef = React.useRef<HTMLDivElement>(null);
@@ -83,7 +93,9 @@ function AppContent() {
 
   // Sync scroll positions on path changes (e.g. back/forward navigation)
   useEffect(() => {
-    window.scrollTo(0, 0);
+    window.scrollTo({ top: 0, behavior: 'instant' as ScrollBehavior });
+    document.documentElement.scrollTop = 0;
+    document.body.scrollTop = 0;
     if (tabletScrollRef.current) {
       tabletScrollRef.current.scrollTop = 0;
     }
@@ -94,9 +106,11 @@ function AppContent() {
     window.history.pushState({}, '', path);
     setCurrentPath(pathname);
     setSearchParams(new URLSearchParams(search || ''));
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+    window.scrollTo({ top: 0, behavior: 'instant' as ScrollBehavior });
+    document.documentElement.scrollTop = 0;
+    document.body.scrollTop = 0;
     if (tabletScrollRef.current) {
-      tabletScrollRef.current.scrollTo({ top: 0, behavior: 'smooth' });
+      tabletScrollRef.current.scrollTop = 0;
     }
   };
 
@@ -117,9 +131,29 @@ function AppContent() {
   };
 
   const handleOpenChatWithStore = (storeId: string, storeName: string) => {
+    if (!currentUser) {
+      setIsAuthOpen(true);
+      return;
+    }
+    // Prevent self-chat: check if target store belongs to the logged-in user
+    const isOwnStore = (userProfile?.storeId && userProfile.storeId === storeId) ||
+      stores.some(s => s.storeId === storeId && s.ownerUid === currentUser.uid);
+
+    if (isOwnStore) {
+      showToast("এটি আপনার নিজস্ব স্টোর। নিজের দোকানের সাথে চ্যাট করা সম্ভব নয়। (This is your own store. You cannot chat with yourself.)");
+      return;
+    }
+
     setChatTarget({ storeId, storeName });
     navigate('/chat');
   };
+
+  // Automatically prompt auth modal if user navigates to auth-required routes
+  useEffect(() => {
+    if ((currentPath === '/chat' || currentPath === '/checkout') && !currentUser) {
+      setIsAuthOpen(true);
+    }
+  }, [currentPath, currentUser]);
 
   // Dynamic SEO metadata synchronization
   useEffect(() => {
@@ -325,6 +359,7 @@ function AppContent() {
           products={products}
           initialTab={isNew ? 'new_product' : 'overview'}
           onNavigateProduct={pSlug => navigateToProduct(pSlug)}
+          onNavigate={navigate}
         />
       );
     }
@@ -344,12 +379,26 @@ function AppContent() {
 
     // 7. Real-Time Chat: '/chat'
     if (currentPath === '/chat') {
+      if (!currentUser) {
+        return (
+          <div className="bg-white rounded-3xl p-8 sm:p-12 text-center border border-slate-200 my-8 max-w-lg mx-auto shadow-xs">
+            <h2 className="text-lg font-bold text-slate-800">Sign In Required to Chat</h2>
+            <p className="text-xs text-slate-500 mt-1">Please log in to message store merchants directly.</p>
+            <button
+              onClick={() => setIsAuthOpen(true)}
+              className="mt-4 px-5 py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold rounded-xl cursor-pointer"
+            >
+              Sign In / Create Account
+            </button>
+          </div>
+        );
+      }
       return (
-        <div className="space-y-4 py-2">
+        <div className="w-full max-w-5xl mx-auto py-1 sm:py-2 space-y-3">
           <div className="flex items-center justify-between">
             <div>
-              <h1 className="text-xl font-black text-slate-900">Direct Merchant & Buyer Chat</h1>
-              <p className="text-xs text-slate-500">Live messaging, instant photo attachments & inquiry support</p>
+              <h1 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight">Direct Merchant & Buyer Chat</h1>
+              <p className="text-xs sm:text-sm text-slate-500">Live messaging, instant photo attachments & inquiry support</p>
             </div>
           </div>
           <RealtimeChat
@@ -363,6 +412,20 @@ function AppContent() {
 
     // 8. Checkout: '/checkout'
     if (currentPath === '/checkout') {
+      if (!currentUser) {
+        return (
+          <div className="bg-white rounded-3xl p-12 text-center border border-slate-200 my-8">
+            <h2 className="text-lg font-bold text-slate-800">Sign In Required for Checkout</h2>
+            <p className="text-xs text-slate-500 mt-1">Please log in to complete your order checkout.</p>
+            <button
+              onClick={() => setIsAuthOpen(true)}
+              className="mt-4 px-5 py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold rounded-xl"
+            >
+              Sign In / Create Account
+            </button>
+          </div>
+        );
+      }
       return (
         <CheckoutPage
           onBackToShopping={() => navigate('/')}
@@ -386,6 +449,7 @@ function AppContent() {
       return (
         <ProfilePage
           onNavigateOrders={() => navigate('/orders')}
+          onNavigateChat={() => navigate('/chat')}
           onNavigateSeller={() => navigate('/seller/dashboard')}
           onNavigateAdmin={() => navigate('/admin')}
           onOpenAuth={() => setIsAuthOpen(true)}
@@ -459,6 +523,20 @@ function AppContent() {
           isOpen={isAuthOpen}
           onClose={() => setIsAuthOpen(false)}
         />
+
+        {/* Floating Toast Notification Banner */}
+        {toastMessage && (
+          <div className="fixed top-20 left-1/2 -translate-x-1/2 z-50 bg-slate-900/95 backdrop-blur-md text-white px-5 py-3 rounded-2xl shadow-2xl flex items-center gap-3 text-xs font-semibold max-w-md w-[90%] sm:w-auto border border-slate-700 animate-in fade-in slide-in-from-top-4 duration-200">
+            <AlertCircle className="w-4 h-4 text-amber-400 shrink-0" />
+            <span className="flex-1">{toastMessage}</span>
+            <button 
+              onClick={() => setToastMessage(null)} 
+              className="text-slate-400 hover:text-white p-0.5 cursor-pointer"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        )}
       </div>
     </CartProvider>
   );
